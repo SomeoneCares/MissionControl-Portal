@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import type { State, HealthInfo } from "./types";
 import { api, subscribeState } from "./api/client";
 import { Overview } from "./tabs/Overview";
+import { Agents } from "./tabs/Agents";
+import { Tasks } from "./tabs/Tasks";
 import "./styles/app.css";
 
 const TABS = ["Overview", "Agents", "Chat", "Runs", "Tasks", "Office", "Content", "Schedule"] as const;
@@ -51,7 +53,9 @@ export function App() {
         {error && <div className="banner danger">Cannot reach the portal backend — {error}</div>}
         {!state && !error && <div className="loading mono">loading live state…</div>}
         {state && tab === "Overview" && <Overview state={state} health={health} />}
-        {state && tab !== "Overview" && (
+        {state && tab === "Agents" && <Agents state={state} />}
+        {tab === "Tasks" && <Tasks />}
+        {state && !["Overview", "Agents", "Tasks"].includes(tab) && (
           <div className="placeholder">
             <span className="eyebrow">{tab}</span>
             <p className="mono">This tab is next in the build. Live data is already flowing.</p>

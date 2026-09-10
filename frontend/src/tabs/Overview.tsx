@@ -17,6 +17,32 @@ export function Overview({ state, health }: { state: State; health: HealthInfo |
 
   return (
     <div className="overview">
+      {/* hero */}
+      <section className="hero card">
+        <div className="hero-body">
+          <div className="eyebrow hero-eyebrow">
+            <span className="dot" /> Live · Orchestration layer
+          </div>
+          <h1 className="display hero-title">
+            {fleet.length} agents.<br />
+            <span className="ember">one console.</span>
+          </h1>
+          <p className="hero-lede">
+            {topAgent && topAgent.share > 0
+              ? `${topAgent.name} is carrying ${topAgent.share}% of the workload across ${routing.total} logged runs.`
+              : `Fleet is idle — ${fleet.length} agents ready, no runs logged yet on this host.`}
+          </p>
+        </div>
+        <div className="hero-side">
+          <span className={`pill ${state.health?.gateway_state === "running" ? "ok" : "danger"}`}>
+            gateway {state.health?.gateway_state ?? "unknown"}
+          </span>
+          {platforms.map(([name, st]) => (
+            <span key={name} className={`pill ${st === "connected" ? "ok" : "warn"}`}>{name}</span>
+          ))}
+        </div>
+      </section>
+
       {/* health strip */}
       <section className="card health-strip">
         <div>

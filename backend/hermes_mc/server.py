@@ -50,6 +50,22 @@ class DataProvider:
         except GatewayError:
             return {}
 
+    def toolsets(self) -> list[dict]:
+        if not self.gateway:
+            return []
+        try:
+            return self.gateway.toolsets()
+        except GatewayError:
+            return []
+
+    def skills(self) -> list[dict]:
+        if not self.gateway:
+            return []
+        try:
+            return self.gateway.skills()
+        except GatewayError:
+            return []
+
     def _build(self) -> dict:
         if self._local is not None:
             data = self._local.build_state()
@@ -128,6 +144,10 @@ class Handler(BaseHTTPRequestHandler):
             })
         if path == "/api/capabilities":
             return self._json(self.provider.capabilities())
+        if path == "/api/toolsets":
+            return self._json({"data": self.provider.toolsets()})
+        if path == "/api/skills":
+            return self._json({"data": self.provider.skills()})
         if path == "/api/state":
             return self._json(self.provider.state())
         if path == "/api/board":
