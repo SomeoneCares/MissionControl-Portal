@@ -23,3 +23,7 @@ reference/
 Thumbs.db
 reference/
 .git-commit-msg.tmp
+
+# build/run artifacts
+frontend/build.log
+backend/server.log

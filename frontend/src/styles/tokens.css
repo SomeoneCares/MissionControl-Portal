@@ -1,0 +1,129 @@
+/* Hermes Mission Control — design tokens.
+   The ink / cream / ember identity, theme-aware. Light is the default;
+   dark redefines only the tokens. Components style through tokens only. */
+
+:root {
+  --ground: #f4efe3;
+  --panel: #fbf7ee;
+  --panel-2: #efe8d9;
+  --ink: #1f1810;
+  --ink-soft: #4e4437;
+  --muted: #7c6e5c;
+  --line: #ddd3c0;
+  --line-soft: #e8e0d0;
+  --ember: #c2481b;
+  --ember-soft: #e0794a;
+  --ember-bg: #f7e6dd;
+  --spot: #0e7c8b;
+  --ok: #3e6b47;
+  --ok-bg: #e6efe5;
+  --warn: #8a6410;
+  --warn-bg: #f7eed9;
+  --danger: #a3352f;
+  --danger-bg: #f6e4e2;
+
+  --font-display: "Instrument Serif", "Times New Roman", serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --radius: 14px;
+  --radius-lg: 20px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #16110b;
+    --panel: #1e1810;
+    --panel-2: #272016;
+    --ink: #f4eddf;
+    --ink-soft: #c8bca8;
+    --muted: #9a8b76;
+    --line: #352c20;
+    --line-soft: #2b2318;
+    --ember: #f0895a;
+    --ember-soft: #f2a97e;
+    --ember-bg: #33200f;
+    --spot: #3fc3d6;
+    --ok: #8fbf98;
+    --ok-bg: #1b2a1d;
+    --warn: #ddb65e;
+    --warn-bg: #2e2413;
+    --danger: #e07a72;
+    --danger-bg: #2e1b1a;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground: #16110b;
+  --panel: #1e1810;
+  --panel-2: #272016;
+  --ink: #f4eddf;
+  --ink-soft: #c8bca8;
+  --muted: #9a8b76;
+  --line: #352c20;
+  --line-soft: #2b2318;
+  --ember: #f0895a;
+  --ember-soft: #f2a97e;
+  --ember-bg: #33200f;
+  --spot: #3fc3d6;
+  --ok: #8fbf98;
+  --ok-bg: #1b2a1d;
+  --warn: #ddb65e;
+  --warn-bg: #2e2413;
+  --danger: #e07a72;
+  --danger-bg: #2e1b1a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-weight: 400;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono { font-family: var(--font-mono); }
+.display { font-family: var(--font-display); font-weight: 400; }
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.pill.ok { color: var(--ok); border-color: var(--ok); background: var(--ok-bg); }
+.pill.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-bg); }
+.pill.danger { color: var(--danger); border-color: var(--danger); background: var(--danger-bg); }
+
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ember); display: inline-block; }
+
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
