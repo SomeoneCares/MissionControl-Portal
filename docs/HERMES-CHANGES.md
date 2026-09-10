@@ -76,6 +76,18 @@ Requires a gateway restart (`hermes gateway restart`) to take effect.
   `kanban_create` to `soc-analyst` / `soc-hunter` / `soc-assessment` /
   `soc-response`; the routing table now lists the profile name per request type.
 
+### 1d. Auto-advancing pipeline (no manual nudge between stages)
+
+The first live run required asking the orchestrator for status after each stage so
+it would fire the next one. Fixed with Kanban **task dependencies**: both ROUTING
+files now tell the orchestrator to build the whole chain in ONE turn, giving each
+later stage a `parents` list with the previous stage's task id. A task whose
+parent is not `done` sits in `todo`; the dispatcher automatically promotes and
+runs it the moment the parent finishes. Verified on this host — a child created
+with `--parent <id>` lands in `todo` (gated) while the parent is `ready`, then
+auto-runs on parent completion. So `pt-scanner -> pt-validator -> pt-reporter`
+runs start-to-finish with no human nudging between stages.
+
 ### 1c. Durable, shared artifacts (each kanban task has an isolated ephemeral scratch workspace)
 
 A kanban task runs in its own scratch workspace that is not shared between stages
