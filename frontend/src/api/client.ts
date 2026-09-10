@@ -3,20 +3,33 @@
 
 import type { State, HealthInfo, BoardTask } from "../types";
 
+// the selected fleet is appended to every request; "primary" is the portal's own host
+let fleetId = "primary";
+export function setFleet(id: string) { fleetId = id || "primary"; }
+export function getFleet() { return fleetId; }
+export function withFleet(path: string): string {
+  if (fleetId === "primary") return path;
+  return path + (path.includes("?") ? "&" : "?") + "fleet=" + encodeURIComponent(fleetId);
+}
+
 async function getJSON<T>(path: string): Promise<T> {
-  const res = await fetch(path, { headers: { Accept: "application/json" } });
+  const res = await fetch(withFleet(path), { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
   return res.json() as Promise<T>;
 }
 
 async function postJSON<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(withFleet(path), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
   return res.json() as Promise<T>;
+}
+
+export interface FleetInfo {
+  id: string; name: string; accent: string; mode: string; primary: boolean; gateway: boolean;
 }
 
 export const api = {
@@ -42,11 +55,24 @@ export const api = {
     postJSON<{ ok: boolean }>("/api/runs/steer", { run, text, agent }),
   approve: (run: string, choice: string, agent: string | null, request_id?: string) =>
     postJSON<{ ok: boolean }>("/api/runs/approval", { run, choice, agent, request_id }),
+  fleets: () => getJSON<{ fleets: FleetInfo[]; current: string }>("/api/fleets"),
+  addFleet: (spec: { name: string; accent?: string; bridge_url?: string; bridge_key?: string; gateway_url?: string; gateway_key?: string }) =>
+    postJSON<FleetInfo>("/api/fleets", spec),
+  removeFleet: (id: string) => postJSON<{ removed: boolean }>("/api/fleets/remove", { id }),
   schedule: () => getJSON<{ jobs: CronJob[] }>("/api/schedule"),
   content: () => getJSON<{ docs: ContentDoc[] }>("/api/content"),
   contentRead: (p: string) =>
     getJSON<{ path: string; exists: boolean; content: string }>(
       `/api/content/read?path=${encodeURIComponent(p)}`),
+  contentSave: (p: string, content: string) =>
+    postJSON<{ ok: boolean; size: number }>("/api/content/save", { path: p, content }),
+  contentCreate: (agent: string, title: string) =>
+    postJSON<{ ok: boolean; path: string }>("/api/content/create", { agent, title }),
+  contentDelete: (p: string) => postJSON<{ ok: boolean }>("/api/content/delete", { path: p }),
+  contentDownloadUrl: (p: string) => withFleet(`/api/content/download?path=${encodeURIComponent(p)}`),
+  contentWordUrl: (p: string) => withFleet(`/api/content/word?path=${encodeURIComponent(p)}`),
+  createAgent: (spec: { name: string; role?: string; model?: string; provider?: string }) =>
+    postJSON<{ ok: boolean; agent: string; name: string }>("/api/agents/create", spec),
   board: {
     list: () => getJSON<{ tasks: BoardTask[] }>("/api/board"),
     create: (t: { title: string; priority?: string; status?: string }) =>
@@ -145,7 +171,7 @@ export function chatStream(
   const ctrl = new AbortController();
   (async () => {
     try {
-      const res = await fetch("/api/chat", {
+      const res = await fetch(withFleet("/api/chat"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages, agent, attachments: attachments ?? [] }),
@@ -206,7 +232,7 @@ export function subscribeState(onState: (s: State) => void): () => void {
   };
 
   try {
-    es = new EventSource("/events");
+    es = new EventSource(withFleet("/events"));
     es.addEventListener("state", (e) => {
       try {
         onState(JSON.parse((e as MessageEvent).data));

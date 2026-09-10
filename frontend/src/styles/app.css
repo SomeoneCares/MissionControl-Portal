@@ -377,3 +377,21 @@
 .dossier-fields > div:last-child { border-bottom: none; }
 .dossier-fields dt { color: rgba(247,240,225,0.5); font-size: 11px; }
 .dossier-fields dd { margin: 0; font-size: 11px; color: #f7f0e1; }
+
+/* ===== modals (new agent / new doc) ===== */
+.modal { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(440px, 92vw); background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 22px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 30px 80px rgba(0,0,0,0.3); }
+.modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.modal-title { font-size: 24px; }
+.modal-actions { margin-top: 16px; display: flex; justify-content: flex-end; }
+.create-note { font-size: 10px; line-height: 1.5; margin: 8px 0 0; }
+.new-agent-btn { align-self: flex-end; }
+
+/* ===== content editing ===== */
+.content-head-right { display: flex; align-items: center; gap: 16px; }
+.content-reader-head { display: flex; justify-content: space-between; align-items: center; }
+.content-tools { display: flex; gap: 4px; }
+.content-tool { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); cursor: pointer; text-decoration: none; }
+.content-tool:hover { border-color: var(--ember); color: var(--ember); }
+.content-tool.danger:hover { border-color: var(--danger); color: var(--danger); }
+.content-editor { width: 100%; min-height: 420px; margin-top: 12px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--ground); color: var(--ink); font-size: 13px; line-height: 1.6; resize: vertical; white-space: pre-wrap; }
+.content-editor:focus { outline: none; border-color: var(--ember); }

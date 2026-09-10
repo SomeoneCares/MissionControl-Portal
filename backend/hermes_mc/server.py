@@ -26,6 +26,8 @@ from urllib.parse import urlparse, parse_qs, quote
 from . import config as config_mod
 from .agent_admin import AgentAdmin, AdminError
 from .board import Board
+from .content import ContentStore, ContentError
+from .fleets import FleetRegistry
 from .gateway import GatewayClient, GatewayError
 from .local_source import LocalSource
 
@@ -46,6 +48,7 @@ class DataProvider:
         )
         # admin (model + file editing) is local-mode only; the gateway API is read-only for config
         self.admin = AgentAdmin(cfg.hermes_home) if cfg.is_local else None
+        self.content_store = ContentStore(cfg.content_dir) if (cfg.is_local and cfg.content_dir) else None
         self._cache: dict = {"at": 0.0, "data": None}
         self._chat_routes: dict | None = None   # cached per-agent route resolution
         self._working: set[str] = set()          # agents with an in-flight run right now
@@ -212,10 +215,15 @@ class DataProvider:
 
 
 class Handler(BaseHTTPRequestHandler):
-    provider: DataProvider = None   # set on the server instance
+    provider: DataProvider = None   # per-request, resolved from the selected fleet
+    registry: FleetRegistry = None
     dist_dir: Path = None
 
     server_version = "HermesMC/0.1"
+
+    def _fleet_id(self) -> str:
+        q = parse_qs(urlparse(self.path).query).get("fleet", [""])[0]
+        return q or self.headers.get("X-Fleet") or "primary"
 
     # -- helpers ----------------------------------------------------------
 
@@ -244,6 +252,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if self.registry is not None:
+            self.provider = self.registry.provider(self._fleet_id())
+        if path == "/api/fleets":
+            return self._json({"fleets": self.registry.list(), "current": self._fleet_id()})
         if path == "/api/health":
             h = self.provider.gateway.health() if self.provider.gateway else None
             return self._json({
@@ -269,6 +281,27 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(self.provider.content_read(rel))
             except ValueError as e:
                 return self._json({"error": str(e)}, status=400)
+        if path in ("/api/content/download", "/api/content/word"):
+            cs = self.provider.content_store
+            if not cs:
+                return self._json({"error": "content editing is local-mode only"}, status=403)
+            rel = parse_qs(urlparse(self.path).query).get("path", [""])[0]
+            try:
+                if path == "/api/content/word":
+                    data, fname = cs.to_docx(rel)
+                    ctype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                else:
+                    data, fname = cs.raw(rel)
+                    ctype = "text/markdown; charset=utf-8"
+            except ContentError as e:
+                return self._json({"error": str(e)}, status=400)
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if path == "/api/models":
             if not self.provider.admin:
                 return self._json({"models": [], "editable": False})
@@ -290,6 +323,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         body = self._read_body()
+        if self.registry is not None:
+            self.provider = self.registry.provider(self._fleet_id())
+        if path == "/api/fleets":
+            return self._json(self.registry.add(body).public())
+        if path == "/api/fleets/remove":
+            return self._json({"removed": self.registry.remove(body.get("id", ""))})
         try:
             if path == "/api/board":
                 return self._json(self.provider.board.create(
@@ -324,6 +363,21 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/agents/file":
                 return self._admin_write(lambda: self.provider.admin.save_file(
                     body.get("agent", ""), body.get("name", ""), body.get("content", "")))
+            if path == "/api/agents/create":
+                return self._admin_write(lambda: self.provider.admin.create_agent(
+                    body.get("name", ""), body.get("role", ""), body.get("model", ""), body.get("provider", "")))
+            if path in ("/api/content/save", "/api/content/create", "/api/content/delete"):
+                cs = self.provider.content_store
+                if not cs:
+                    return self._json({"error": "content editing is local-mode only"}, status=403)
+                try:
+                    if path == "/api/content/save":
+                        return self._json(cs.save(body.get("path", ""), body.get("content", "")))
+                    if path == "/api/content/create":
+                        return self._json(cs.create(body.get("agent", ""), body.get("title", "")))
+                    return self._json(cs.delete(body.get("path", "")))
+                except ContentError as e:
+                    return self._json({"error": str(e)}, status=400)
         except ValueError as e:
             return self._json({"error": str(e)}, status=400)
         self._json({"error": "not found"}, status=404)
@@ -481,9 +535,10 @@ def _content_type(suffix: str) -> str:
 
 
 def make_server(cfg: config_mod.Config) -> ThreadingHTTPServer:
-    provider = DataProvider(cfg)
+    registry = FleetRegistry(cfg, lambda c: DataProvider(c))
     dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
-    Handler.provider = provider
+    Handler.registry = registry
+    Handler.provider = registry.provider("primary")
     Handler.dist_dir = dist
     httpd = ThreadingHTTPServer((cfg.host, cfg.port), Handler)
     return httpd

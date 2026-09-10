@@ -11,8 +11,10 @@ files live at the Hermes root; every other agent's under ``profiles/<agent>/``.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
+import subprocess
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -174,6 +176,47 @@ class AgentAdmin:
         tmp.replace(p)
         return {"ok": True, "name": name, "size": p.stat().st_size,
                 "backup": backup.name if backup else None}
+
+    # -- agent creation ----------------------------------------------------
+
+    def create_agent(self, name: str, role: str = "", model: str = "", provider: str = "") -> dict:
+        """Create a new agent profile via the ``hermes`` CLI, then write its SOUL and model.
+        The new profile directory is picked up by the fleet automatically. Rolls back on failure."""
+        name = (name or "").strip()
+        if not name:
+            raise AdminError("agent name is required")
+        agent = re.sub(r"[^a-z0-9-]+", "-", name.lower()).strip("-")
+        if not agent:
+            raise AdminError("could not derive a profile id from that name")
+        pdir = self.home / "profiles" / agent
+        if pdir.exists() or agent == "orchestrator":
+            raise AdminError(f"a profile named '{agent}' already exists")
+        hermes_bin = shutil.which("hermes") or str(self.home / "hermes-agent" / "hermes")
+        if not Path(hermes_bin).exists() and not shutil.which("hermes"):
+            raise AdminError("hermes CLI not found on this host")
+        desc = f"{name}{(' — ' + role) if role else ''}"
+        try:
+            proc = subprocess.run(
+                [hermes_bin, "profile", "create", agent, "--no-alias", "--description", desc],
+                env={**os.environ, "HERMES_HOME": str(self.home)},
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, timeout=120, check=False)
+        except (OSError, subprocess.SubprocessError) as e:
+            raise AdminError(f"could not run hermes profile create: {e}")
+        if proc.returncode != 0:
+            raise AdminError("hermes profile create failed: " + (proc.stderr or proc.stdout or "")[-400:])
+        try:
+            if role or name:
+                soul = f"# {name}\n\n## Identity and purpose\nYou are {name}"
+                soul += f", the {role}." if role else "."
+                soul += "\n"
+                (pdir / "SOUL.md").write_text(soul, encoding="utf-8")
+            if model:
+                self.set_model(agent, model, provider)
+        except Exception as e:  # noqa: BLE001 — roll the profile back if post-setup fails
+            shutil.rmtree(pdir, ignore_errors=True)
+            raise AdminError(f"profile created but setup failed (rolled back): {e}")
+        return {"ok": True, "agent": agent, "name": name}
 
     # -- model assignment (edits config.yaml, backed up) -------------------
 

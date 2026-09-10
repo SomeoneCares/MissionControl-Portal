@@ -9,8 +9,12 @@ export function Content() {
   const [open, setOpen] = useState<ContentDoc | null>(null);
   const [body, setBody] = useState<string>("");
   const [loadingDoc, setLoadingDoc] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
-  useEffect(() => { api.content().then((d) => setDocs(d.docs)).catch(() => setDocs([])); }, []);
+  const reload = () => api.content().then((d) => setDocs(d.docs));
+  useEffect(() => { reload(); }, []);
 
   const agents = useMemo(
     () => ["all", ...Array.from(new Set((docs ?? []).map((d) => d.agent).filter(Boolean)))],
@@ -19,9 +23,31 @@ export function Content() {
   const list = (docs ?? []).filter((d) => agent === "all" || d.agent === agent);
 
   const openDoc = async (d: ContentDoc) => {
-    setOpen(d); setBody(""); setLoadingDoc(true);
+    setOpen(d); setBody(""); setLoadingDoc(true); setEditing(false); setMsg(null);
     try { const r = await api.contentRead(d.path); setBody(r.content); } catch { setBody("(failed to load)"); }
     setLoadingDoc(false);
+  };
+
+  const save = async () => {
+    if (!open) return;
+    try { await api.contentSave(open.path, body); setEditing(false); setMsg("Saved."); reload(); }
+    catch (e) { setMsg(String(e)); }
+  };
+
+  const remove = async () => {
+    if (!open || !confirm(`Delete "${open.title}"?`)) return;
+    try { await api.contentDelete(open.path); setOpen(null); reload(); }
+    catch (e) { setMsg(String(e)); }
+  };
+
+  const createDoc = async (a: string, title: string) => {
+    try {
+      const r = await api.contentCreate(a, title);
+      setCreating(false);
+      await reload();
+      const d = (await api.content()).docs.find((x) => x.path === r.path);
+      if (d) openDoc(d);
+    } catch (e) { setMsg(String(e)); }
   };
 
   return (
@@ -31,8 +57,13 @@ export function Content() {
           <span className="eyebrow">Agent output</span>
           <h1 className="display content-title">The <span className="ember">library.</span></h1>
         </div>
-        <div className="runs-stat"><div className="display runs-stat-num tabular">{docs?.length ?? 0}</div><span className="eyebrow">documents</span></div>
+        <div className="content-head-right">
+          <div className="runs-stat"><div className="display runs-stat-num tabular">{docs?.length ?? 0}</div><span className="eyebrow">documents</span></div>
+          <button className="btn-primary" onClick={() => setCreating(true)}>+ New doc</button>
+        </div>
       </section>
+
+      {creating && <NewDocModal agents={agents} onClose={() => setCreating(false)} onCreate={createDoc} />}
 
       {docs === null ? (
         <p className="mono muted pane-loading">loading…</p>
@@ -68,13 +99,65 @@ export function Content() {
               <>
                 <div className="content-reader-head">
                   <span className="mono muted">{open.agent} · {open.filename}</span>
+                  <div className="content-tools">
+                    {editing ? (
+                      <>
+                        <button className="content-tool" onClick={save}>Save</button>
+                        <button className="content-tool" onClick={() => { setEditing(false); openDoc(open); }}>Cancel</button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="content-tool" onClick={() => setEditing(true)}>Edit</button>
+                        <a className="content-tool" href={api.contentDownloadUrl(open.path)} download>Download</a>
+                        <a className="content-tool" href={api.contentWordUrl(open.path)}>Word</a>
+                        <button className="content-tool danger" onClick={remove}>Delete</button>
+                      </>
+                    )}
+                  </div>
                 </div>
-                <div className="content-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }} />
+                {msg && <p className="pane-msg mono">{msg}</p>}
+                {editing ? (
+                  <textarea className="content-editor mono" value={body} onChange={(e) => setBody(e.target.value)} spellCheck={false} />
+                ) : (
+                  <div className="content-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }} />
+                )}
               </>
             )}
           </section>
         </div>
       )}
+    </div>
+  );
+}
+
+function NewDocModal({ agents, onClose, onCreate }: { agents: string[]; onClose: () => void; onCreate: (a: string, t: string) => void }) {
+  const authors = agents.filter((a) => a !== "all");
+  const [agent, setAgent] = useState(authors[0] ?? "");
+  const [title, setTitle] = useState("");
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="drawer-scrim" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <span className="display modal-title">New document</span>
+          <button className="drawer-x" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <label className="pane-label">Author</label>
+        <select className="model-select mono" value={agent} onChange={(e) => setAgent(e.target.value)}>
+          {authors.length === 0 && <option value="">(no agents)</option>}
+          {authors.map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <label className="pane-label">Title</label>
+        <input className="add-input" value={title} autoFocus placeholder="Document title" onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && title.trim() && onCreate(agent, title.trim())} />
+        <div className="modal-actions">
+          <button className="btn-primary" onClick={() => title.trim() && onCreate(agent, title.trim())} disabled={!title.trim()}>Create</button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { api, type ModelOption, type AgentFile } from "../api/client";
 export function Agents({ state }: { state: State }) {
   const [selected, setSelected] = useState<Agent | null>(null);
   const [toolsets, setToolsets] = useState<string[] | null>(null);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     // Toolsets are a fleet-wide capability, read from the gateway via the backend.
@@ -42,8 +43,11 @@ export function Agents({ state }: { state: State }) {
             <div className="display head-stat tabular">{avgSuccess}%</div>
             <span className="eyebrow">avg success</span>
           </div>
+          <button className="btn-primary new-agent-btn" onClick={() => setCreating(true)}>+ New agent</button>
         </div>
       </section>
+
+      {creating && <CreateAgentModal onClose={() => setCreating(false)} />}
 
       {toolsets && toolsets.length > 0 && (
         <section className="card">
@@ -82,6 +86,67 @@ export function Agents({ state }: { state: State }) {
 }
 
 type DrawerTab = "profile" | "model" | "files";
+
+function CreateAgentModal({ onClose }: { onClose: () => void }) {
+  const [name, setName] = useState("");
+  const [role, setRole] = useState("");
+  const [model, setModel] = useState("");
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => { api.models().then((d) => setModels(d.models)).catch(() => setModels([])); }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const create = async () => {
+    if (!name.trim()) { setMsg("Name is required."); return; }
+    setBusy(true); setMsg(null);
+    try {
+      const r = await api.createAgent({ name: name.trim(), role: role.trim(), model });
+      setMsg(`Created ${r.agent}. It joins the fleet on the next state refresh; set its persona in Files.`);
+      setTimeout(onClose, 1400);
+    } catch (e) {
+      setMsg(String(e));
+      setBusy(false);
+    }
+  };
+
+  const byProvider: Record<string, ModelOption[]> = {};
+  models.forEach((m) => { (byProvider[m.provider || "other"] ??= []).push(m); });
+
+  return (
+    <div className="drawer-scrim" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <span className="display modal-title">New agent</span>
+          <button className="drawer-x" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <label className="pane-label">Name</label>
+        <input className="add-input" value={name} autoFocus placeholder="e.g. Analyst" onChange={(e) => setName(e.target.value)} />
+        <label className="pane-label">Role</label>
+        <input className="add-input" value={role} placeholder="e.g. log triage and investigation" onChange={(e) => setRole(e.target.value)} />
+        <label className="pane-label">Model</label>
+        <select className="model-select mono" value={model} onChange={(e) => setModel(e.target.value)}>
+          <option value="">default</option>
+          {Object.entries(byProvider).map(([prov, list]) => (
+            <optgroup key={prov} label={prov}>
+              {list.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </optgroup>
+          ))}
+        </select>
+        <p className="mono muted create-note">Creates a real Hermes profile via the CLI. Persona and memory are edited after, in the agent's Files.</p>
+        {msg && <p className="pane-msg mono">{msg}</p>}
+        <div className="modal-actions">
+          <button className="btn-primary" onClick={create} disabled={busy || !name.trim()}>{busy ? "Creating…" : "Create agent"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function AgentDrawer({ agent, onClose }: { agent: Agent; onClose: () => void }) {
   const [tab, setTab] = useState<DrawerTab>("profile");
