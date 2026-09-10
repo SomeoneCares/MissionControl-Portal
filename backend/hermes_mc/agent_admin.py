@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -51,7 +53,11 @@ class AgentAdmin:
     # -- models ------------------------------------------------------------
 
     def list_models(self) -> list[dict]:
-        """Available models on this host, from the live provider cache and the model catalog."""
+        """Models that are **activated** on this host — usable right now with no further server
+        configuration. That means: providers with credentials (``auth.json``), providers already
+        fetched live (``provider_models_cache.json``), and local model servers such as Ollama.
+        The full static catalog is included **only** for providers that are actually configured;
+        models that would need an API key set up are omitted."""
         seen: dict[str, dict] = {}
 
         def add(provider: str, model: str, source: str):
@@ -59,27 +65,36 @@ class AgentAdmin:
             if not model:
                 return
             mid = f"{provider}::{model}" if provider else model
-            seen.setdefault(mid, {
-                "id": mid, "model": model, "provider": provider,
-                "label": model.split("/")[-1], "source": source,
-            })
+            if mid not in seen or seen[mid]["source"] != "live":
+                seen[mid] = {
+                    "id": mid, "model": model, "provider": provider,
+                    "label": model.split("/")[-1], "source": source,
+                }
 
-        cache = self.home / "provider_models_cache.json"
-        if cache.exists():
-            try:
-                raw = json.loads(cache.read_text(encoding="utf-8"))
-                for prov, pdata in (raw.items() if isinstance(raw, dict) else []):
-                    for m in (pdata.get("models", []) if isinstance(pdata, dict) else []):
-                        add(str(prov), str(m), "live")
-            except (OSError, ValueError):
-                pass
+        configured, local_endpoints = self._configured_providers()
 
-        catalog = self.home / "cache" / "model_catalog.json"
-        if catalog.exists():
+        # 1. live provider cache — providers Hermes has successfully fetched from = activated
+        try:
+            raw = json.loads((self.home / "provider_models_cache.json").read_text(encoding="utf-8"))
+            for prov, pdata in (raw.items() if isinstance(raw, dict) else []):
+                for m in (pdata.get("models", []) if isinstance(pdata, dict) else []):
+                    add(str(prov), str(m), "live")
+        except (OSError, ValueError):
+            pass
+
+        # 2. local model servers (Ollama) named in the credential pool — always activated
+        for hostport in local_endpoints:
+            for m in self._local_models(hostport):
+                add("custom", m, "local")
+
+        # 3. static catalog — ONLY for providers that are actually configured
+        if configured:
             try:
-                raw = json.loads(catalog.read_text(encoding="utf-8"))
+                raw = json.loads((self.home / "cache" / "model_catalog.json").read_text(encoding="utf-8"))
                 provs = raw.get("providers", {}) if isinstance(raw, dict) else {}
                 for prov, pdata in (provs.items() if isinstance(provs, dict) else []):
+                    if prov not in configured:
+                        continue
                     for m in (pdata.get("models", []) if isinstance(pdata, dict) else []):
                         mid = m.get("id") if isinstance(m, dict) else m
                         add(str(prov), str(mid or ""), "catalog")
@@ -87,6 +102,38 @@ class AgentAdmin:
                 pass
 
         return sorted(seen.values(), key=lambda o: (o["provider"], o["label"]))
+
+    def _configured_providers(self) -> tuple[set[str], list[str]]:
+        """(provider names with credentials, local model-server host:port list). Reads only names
+        and endpoints from auth.json — never a credential value."""
+        configured: set[str] = set()
+        endpoints: list[str] = []
+        try:
+            d = json.loads((self.home / "auth.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return configured, endpoints
+        provs = d.get("providers")
+        if isinstance(provs, dict):
+            configured |= {str(k) for k in provs}
+        pool = d.get("credential_pool")
+        if isinstance(pool, dict):
+            for name in pool:
+                configured.add(str(name).split(":", 1)[0])
+                m = re.search(r"(\d{1,3}(?:\.\d{1,3}){3}:\d+|localhost:\d+)", str(name))
+                if m:
+                    endpoints.append(m.group(1))
+        return configured, endpoints
+
+    @staticmethod
+    def _local_models(hostport: str) -> list[str]:
+        """Model tags served by a local Ollama-compatible server. Empty if unreachable."""
+        try:
+            req = urllib.request.Request(f"http://{hostport}/api/tags")
+            with urllib.request.urlopen(req, timeout=3.0) as r:
+                data = json.loads(r.read().decode("utf-8"))
+            return [str(m.get("name")) for m in data.get("models", []) if m.get("name")]
+        except (urllib.error.URLError, OSError, ValueError):
+            return []
 
     # -- files -------------------------------------------------------------
 

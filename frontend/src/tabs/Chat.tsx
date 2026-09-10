@@ -1,30 +1,32 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { State, HealthInfo, Agent } from "../types";
 import { api, chatStream, type ChatMessage, type ChatAgents, type ToolEvent } from "../api/client";
+import { chatStore, type Turn } from "../store/chatStore";
 
 // Chat — the comms surface. Pick an agent on the left, talk to it on the right. Each reply is a
-// real streamed agent turn. Per-agent selection uses the gateway's multiplex prefix; when
-// multiplexing is off, only the single default gateway agent is reachable and the tab says so.
+// real streamed agent turn. Threads persist across tab navigation and page reloads via a store
+// backed by localStorage (per-viewer history). Per-agent selection uses the gateway's multiplex
+// prefix; when multiplexing is off, only the single default gateway agent is reachable.
 //
-// Layers still to come on this same surface: reasoning stream, tool-call timeline, stop/steer,
-// approvals, attachments, and voice (push-to-talk + spoken replies).
-
-interface Turn extends ChatMessage {
-  streaming?: boolean;
-  reasoning?: string;
-  tools?: ToolEvent[];
-}
+// Layers still to come on this same surface: tool-call timeline detail, stop/steer, approvals,
+// attachments, and voice (push-to-talk + spoken replies).
 
 const DEFAULT_KEY = "__default__"; // the single gateway agent when multiplexing is off
+
+// abort handlers live outside the component so a turn survives leaving and returning to the tab
+const aborts: Record<string, () => void> = {};
 
 export function Chat({ state, health }: { state: State; health: HealthInfo | null }) {
   const [info, setInfo] = useState<ChatAgents | null>(null);
   const [current, setCurrent] = useState<string>(DEFAULT_KEY);
-  const [threads, setThreads] = useState<Record<string, Turn[]>>({});
+  const threads = useSyncExternalStore(chatStore.subscribe, chatStore.snapshot);
   const [input, setInput] = useState("");
-  const [busy, setBusy] = useState<Record<string, boolean>>({});
-  const abortRef = useRef<null | (() => void)>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const isStreaming = (key: string) => {
+    const t = threads[key];
+    return !!t && t.length > 0 && !!t[t.length - 1].streaming;
+  };
 
   const gatewayUp = health?.gateway?.ok ?? false;
 
@@ -58,52 +60,47 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
   }, [info]);
 
   const turns = threads[current] ?? [];
-  const isBusy = !!busy[current];
+  const isBusy = isStreaming(current);
   const activeProfile = roster.find((r) => r.key === current)?.profile ?? null;
 
   const send = () => {
     const text = input.trim();
     if (!text || isBusy) return;
     const key = current;
-    const history: Turn[] = [...(threads[key] ?? []), { role: "user", content: text }];
-    setThreads((t) => ({ ...t, [key]: [...history, { role: "assistant", content: "", streaming: true }] }));
+    const history: Turn[] = [...(threads[key] ?? []), { role: "user", content: text, ts: Date.now() }];
+    chatStore.setThread(key, [...history, { role: "assistant", content: "", streaming: true, ts: Date.now() }]);
+    chatStore.persist();
     setInput("");
-    setBusy((b) => ({ ...b, [key]: true }));
 
     const payload: ChatMessage[] = history.map((t) => ({ role: t.role, content: t.content }));
-    const patchLast = (fn: (t: Turn) => void) =>
-      setThreads((t) => {
-        const copy = [...(t[key] ?? [])];
-        const last = copy[copy.length - 1];
-        if (last) fn(last);
-        return { ...t, [key]: copy };
-      });
-
-    abortRef.current = chatStream(payload, activeProfile, {
-      onDelta: (d) => patchLast((last) => { if (last.streaming) last.content += d; }),
-      onReasoning: (text) => patchLast((last) => { last.reasoning = text; }),
-      onTool: (t) => patchLast((last) => { last.tools = [...(last.tools ?? []), t]; }),
+    aborts[key] = chatStream(payload, activeProfile, {
+      onDelta: (d) => chatStore.patchLast(key, (last) => { if (last.streaming) last.content += d; }),
+      onReasoning: (text) => chatStore.patchLast(key, (last) => { last.reasoning = text; }),
+      onTool: (t) => chatStore.patchLast(key, (last) => { last.tools = [...(last.tools ?? []), t]; }),
       onDone: () => {
-        patchLast((last) => { last.streaming = false; });
-        setBusy((b) => ({ ...b, [key]: false }));
-        abortRef.current = null;
+        chatStore.patchLast(key, (last) => { last.streaming = false; });
+        chatStore.persist();
+        delete aborts[key];
       },
       onError: (e) => {
-        patchLast((last) => { last.content = last.content || `⚠ ${e}`; last.streaming = false; });
-        setBusy((b) => ({ ...b, [key]: false }));
+        chatStore.patchLast(key, (last) => { last.content = last.content || `⚠ ${e}`; last.streaming = false; });
+        chatStore.persist();
+        delete aborts[key];
       },
     });
   };
 
   const stop = () => {
-    abortRef.current?.();
-    setThreads((t) => {
-      const copy = [...(t[current] ?? [])];
-      const last = copy[copy.length - 1];
-      if (last?.streaming) last.streaming = false;
-      return { ...t, [current]: copy };
-    });
-    setBusy((b) => ({ ...b, [current]: false }));
+    aborts[current]?.();
+    delete aborts[current];
+    chatStore.patchLast(current, (last) => { if (last.streaming) last.streaming = false; });
+    chatStore.persist();
+  };
+
+  const clearThread = () => {
+    aborts[current]?.();
+    delete aborts[current];
+    chatStore.clear(current);
   };
 
   if (!gatewayUp) {
@@ -144,7 +141,10 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
                       <span className="roster-name">{r.label}</span>
                       <span className="mono muted roster-sub">{r.sub}</span>
                     </span>
-                    {busy[r.key] && <span className="roster-busy" />}
+                    {isStreaming(r.key) && <span className="roster-busy" />}
+                    {!isStreaming(r.key) && (threads[r.key]?.length ?? 0) > 0 && (
+                      <span className="roster-count mono">{threads[r.key].length}</span>
+                    )}
                   </button>
                 </li>
               );
@@ -187,6 +187,9 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
             ))}
           </div>
           <div className="chat-input-row">
+            {turns.length > 0 && (
+              <button className="chat-clear mono" onClick={clearThread} title="Clear this conversation">clear</button>
+            )}
             <textarea
               className="chat-input"
               placeholder="Message the fleet…"

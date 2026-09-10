@@ -265,3 +265,8 @@
 .file-open-name { flex: 1; font-size: 12px; color: var(--ember); }
 .file-editor { min-height: 340px; padding: 12px; line-height: 1.55; resize: vertical; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
 .file-editor:focus { outline: none; border-color: var(--ember); }
+
+/* ===== chat: persistence extras ===== */
+.roster-count { font-size: 9px; color: var(--muted); background: var(--panel-2); border-radius: 999px; padding: 2px 6px; flex: none; }
+.chat-clear { background: none; border: 1px solid var(--line); border-radius: var(--radius); padding: 9px 12px; color: var(--muted); cursor: pointer; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; align-self: flex-end; }
+.chat-clear:hover { color: var(--danger); border-color: var(--danger); }
