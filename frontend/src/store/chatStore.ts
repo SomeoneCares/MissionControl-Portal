@@ -8,6 +8,7 @@ export interface Turn extends ChatMessage {
   streaming?: boolean;
   reasoning?: string;
   tools?: ToolEvent[];
+  atts?: { name: string; kind: string }[];
   ts?: number;
 }
 

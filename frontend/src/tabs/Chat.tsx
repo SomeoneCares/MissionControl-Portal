@@ -1,7 +1,26 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { State, HealthInfo, Agent } from "../types";
-import { api, chatStream, type ChatMessage, type ChatAgents, type ToolEvent } from "../api/client";
+import { api, chatStream, type ChatMessage, type ChatAgents, type ToolEvent, type Attachment } from "../api/client";
 import { chatStore, type Turn } from "../store/chatStore";
+
+const TEXT_EXT = /\.(md|markdown|txt|json|csv|tsv|ya?ml|toml|ini|log|xml|html?|css|js|ts|tsx|jsx|py|sh|bash|sql|go|rs|c|cpp|h|java|rb|php)$/i;
+
+async function readAttachment(file: File): Promise<Attachment | null> {
+  const isImage = file.type.startsWith("image/");
+  const isText = file.type.startsWith("text/") || file.type === "application/json" || TEXT_EXT.test(file.name);
+  if (!isImage && !isText) return null;
+  return new Promise((resolve) => {
+    const r = new FileReader();
+    r.onerror = () => resolve(null);
+    if (isImage) {
+      r.onload = () => resolve({ name: file.name, kind: "image", size: file.size, dataUrl: String(r.result) });
+      r.readAsDataURL(file);
+    } else {
+      r.onload = () => resolve({ name: file.name, kind: "text", size: file.size, text: String(r.result) });
+      r.readAsText(file);
+    }
+  });
+}
 
 // Chat — the comms surface. Pick an agent on the left, talk to it on the right. Each reply is a
 // real streamed agent turn. Threads persist across tab navigation and page reloads via a store
@@ -21,7 +40,29 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
   const [current, setCurrent] = useState<string>(DEFAULT_KEY);
   const threads = useSyncExternalStore(chatStore.subscribe, chatStore.snapshot);
   const [input, setInput] = useState("");
+  const [draft, setDraft] = useState<Attachment[]>([]);
+  const [dropping, setDropping] = useState(false);
+  const [attachMsg, setAttachMsg] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const addFiles = async (files: FileList | File[]) => {
+    const arr = Array.from(files);
+    const read = await Promise.all(arr.map(readAttachment));
+    const ok = read.filter((a): a is Attachment => a !== null);
+    const skipped = arr.length - ok.length;
+    if (ok.length) setDraft((d) => [...d, ...ok]);
+    setAttachMsg(skipped > 0 ? `${skipped} file(s) skipped — only text files and images are supported.` : null);
+  };
+
+  const onPaste = (e: React.ClipboardEvent) => {
+    // let text paste through natively; capture any pasted files/images
+    const files = e.clipboardData?.files;
+    if (files && files.length > 0) {
+      e.preventDefault();
+      addFiles(files);
+    }
+  };
 
   const isStreaming = (key: string) => {
     const t = threads[key];
@@ -65,12 +106,17 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
 
   const send = () => {
     const text = input.trim();
-    if (!text || isBusy) return;
+    if ((!text && draft.length === 0) || isBusy) return;
     const key = current;
-    const history: Turn[] = [...(threads[key] ?? []), { role: "user", content: text, ts: Date.now() }];
+    const atts = draft.map((a) => ({ name: a.name, kind: a.kind }));
+    const history: Turn[] = [...(threads[key] ?? []),
+      { role: "user", content: text, atts: atts.length ? atts : undefined, ts: Date.now() }];
     chatStore.setThread(key, [...history, { role: "assistant", content: "", streaming: true, ts: Date.now() }]);
     chatStore.persist();
+    const attachments = draft;
     setInput("");
+    setDraft([]);
+    setAttachMsg(null);
 
     const payload: ChatMessage[] = history.map((t) => ({ role: t.role, content: t.content }));
     aborts[key] = chatStream(payload, activeProfile, {
@@ -87,7 +133,7 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
         chatStore.persist();
         delete aborts[key];
       },
-    });
+    }, attachments);
   };
 
   const stop = () => {
@@ -158,7 +204,12 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
         </aside>
 
         {/* conversation */}
-        <section className="card chat-window">
+        <section
+          className={`card chat-window ${dropping ? "dropping" : ""}`}
+          onDragOver={(e) => { e.preventDefault(); setDropping(true); }}
+          onDragLeave={() => setDropping(false)}
+          onDrop={(e) => { e.preventDefault(); setDropping(false); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); }}
+        >
           <div className="chat-messages" ref={scrollRef}>
             {turns.length === 0 && (
               <div className="chat-empty mono">
@@ -180,21 +231,50 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
                     {t.streaming && t.content && <span className="caret" />}
                   </div>
                 )}
+                {t.atts && t.atts.length > 0 && (
+                  <div className="bubble-atts">
+                    {t.atts.map((a, j) => (
+                      <span key={j} className="att-chip mono">
+                        {a.kind === "image" ? "🖼" : "📄"} {a.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {t.role === "assistant" && t.streaming && !t.content && !t.reasoning && (
                   <div className="bubble-body thinking-dots"><span /><span /><span /></div>
                 )}
               </div>
             ))}
           </div>
+          {(draft.length > 0 || attachMsg) && (
+            <div className="draft-atts">
+              {draft.map((a, i) => (
+                <span key={i} className="att-chip mono">
+                  {a.kind === "image" ? "🖼" : "📄"} {a.name}
+                  <button className="att-remove" onClick={() => setDraft((d) => d.filter((_, j) => j !== i))} aria-label="Remove">✕</button>
+                </span>
+              ))}
+              {attachMsg && <span className="mono att-note">{attachMsg}</span>}
+            </div>
+          )}
           <div className="chat-input-row">
             {turns.length > 0 && (
               <button className="chat-clear mono" onClick={clearThread} title="Clear this conversation">clear</button>
             )}
+            <button className="chat-attach" onClick={() => fileRef.current?.click()} title="Attach files" aria-label="Attach files">＋</button>
+            <input
+              ref={fileRef}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}
+            />
             <textarea
               className="chat-input"
-              placeholder="Message the fleet…"
+              placeholder="Message the fleet… (attach with ＋, paste, or drop files)"
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onPaste={onPaste}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
               }}
@@ -203,7 +283,7 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
             {isBusy ? (
               <button className="btn-primary" onClick={stop}>Stop</button>
             ) : (
-              <button className="btn-primary" onClick={send} disabled={!input.trim()}>Send</button>
+              <button className="btn-primary" onClick={send} disabled={!input.trim() && draft.length === 0}>Send</button>
             )}
           </div>
         </section>

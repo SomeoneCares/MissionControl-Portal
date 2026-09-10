@@ -267,9 +267,23 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(messages, list) or not messages:
             return self._json({"error": "messages required"}, status=400)
         profile = self.provider.chat_route(body.get("agent") or None)
-        user_input = messages[-1].get("content", "")
         history = messages[:-1]   # prior turns thread the conversation
         want_reasoning = body.get("reasoning", True)
+
+        # attachments: text files are inlined into the prompt (works with any model); images are
+        # sent as vision content (works where the model supports it).
+        base_text = messages[-1].get("content", "")
+        atts = body.get("attachments") or []
+        text_atts = [a for a in atts if a.get("kind") == "text" and a.get("text")]
+        img_atts = [a for a in atts if a.get("kind") == "image" and a.get("dataUrl")]
+        if text_atts:
+            base_text += "\n\n" + "\n\n".join(
+                f"[Attached file: {a.get('name', 'file')}]\n{a['text']}" for a in text_atts)
+        if img_atts:
+            user_input = [{"type": "text", "text": base_text}] + [
+                {"type": "image_url", "image_url": {"url": a["dataUrl"]}} for a in img_atts]
+        else:
+            user_input = base_text
 
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")

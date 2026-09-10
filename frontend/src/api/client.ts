@@ -85,12 +85,21 @@ export interface ChatHandlers {
   onError: (e: string) => void;
 }
 
+export interface Attachment {
+  name: string;
+  kind: "text" | "image";
+  size: number;
+  text?: string;     // for text files: the content
+  dataUrl?: string;  // for images: a data: URL
+}
+
 // Stream a real agent turn to a specific agent (profile) via the runs API. Surfaces the agent's
 // reasoning and tool activity alongside the answer. Returns an abort function.
 export function chatStream(
   messages: ChatMessage[],
   agent: string | null,
   handlers: ChatHandlers,
+  attachments?: Attachment[],
 ): () => void {
   const ctrl = new AbortController();
   (async () => {
@@ -98,7 +107,7 @@ export function chatStream(
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages, agent }),
+        body: JSON.stringify({ messages, agent, attachments: attachments ?? [] }),
         signal: ctrl.signal,
       });
       if (!res.ok || !res.body) {

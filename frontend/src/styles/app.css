@@ -270,3 +270,15 @@
 .roster-count { font-size: 9px; color: var(--muted); background: var(--panel-2); border-radius: 999px; padding: 2px 6px; flex: none; }
 .chat-clear { background: none; border: 1px solid var(--line); border-radius: var(--radius); padding: 9px 12px; color: var(--muted); cursor: pointer; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; align-self: flex-end; }
 .chat-clear:hover { color: var(--danger); border-color: var(--danger); }
+
+/* ===== chat attachments ===== */
+.chat-window.dropping { border-color: var(--ember); border-style: dashed; }
+.chat-attach { width: 40px; height: 40px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); font-size: 20px; line-height: 1; cursor: pointer; flex: none; align-self: flex-end; }
+.chat-attach:hover { border-color: var(--ember); color: var(--ember); }
+.draft-atts { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 14px 0; align-items: center; }
+.att-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 4px 9px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-soft); }
+.att-remove { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 10px; padding: 0 0 0 2px; }
+.att-remove:hover { color: var(--danger); }
+.att-note { color: var(--warn); font-size: 10px; }
+.bubble-atts { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.bubble.user .bubble-atts { justify-content: flex-end; }
