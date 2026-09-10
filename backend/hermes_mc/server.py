@@ -658,7 +658,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "messages required"}, status=400)
         profile = self.provider.chat_route(body.get("agent") or None)
         history = messages[:-1]   # prior turns thread the conversation
-        want_reasoning = body.get("reasoning", True)
+        # Reasoning effort. Default "low" keeps turns fast. An explicit "low"/"medium"/"high"
+        # from the client overrides it; false disables reasoning. (Higher effort produces more
+        # separate thinking, but for local gpt-oss the runs API tends to mirror the final answer
+        # into reasoning — the front end drops that duplicate so it isn't shown twice.)
+        reasoning_pref = body.get("reasoning", "low")
 
         # attachments: text files are inlined into the prompt (works with any model); images are
         # sent as vision content (works where the model supports it).
@@ -699,7 +703,12 @@ class Handler(BaseHTTPRequestHandler):
         if working_agent:
             self.provider.mark_working(working_agent, True)
         try:
-            model_options = {"reasoning": {"enabled": True, "effort": "low"}} if want_reasoning else None
+            if reasoning_pref is False:
+                model_options = {"reasoning": {"enabled": False}}
+            elif isinstance(reasoning_pref, str) and reasoning_pref in ("low", "medium", "high"):
+                model_options = {"reasoning": {"enabled": True, "effort": reasoning_pref}}
+            else:
+                model_options = None  # use the profile's configured effort — matches the desktop app
             run_id = gw.submit_run(user_input, profile=profile,
                                    conversation_history=history or None,
                                    model_options=model_options)

@@ -275,8 +275,8 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
                 <span className="bubble-role mono">
                   {t.role === "user" ? "you" : (activeProfile ? (fleetByName[activeProfile]?.name ?? "hermes") : "hermes")}
                 </span>
-                {t.role === "assistant" && (t.reasoning || (t.tools && t.tools.length > 0) || (t.subagents && t.subagents.length > 0)) && (
-                  <Thinking reasoning={t.reasoning} tools={t.tools} subagents={t.subagents} live={!!t.streaming} />
+                {t.role === "assistant" && (reasoningIsDistinct(t.reasoning, t.content) || (t.tools && t.tools.length > 0) || (t.subagents && t.subagents.length > 0)) && (
+                  <Thinking reasoning={t.reasoning} content={t.content} tools={t.tools} subagents={t.subagents} live={!!t.streaming} />
                 )}
                 {(t.content || t.role === "user" || !t.streaming) && (
                   <div className="bubble-body">
@@ -397,10 +397,26 @@ function pairSubagents(subs: SubagentEvent[]): SubRow[] {
   return rows;
 }
 
-function Thinking({ reasoning, tools, subagents, live }: { reasoning?: string; tools?: ToolEvent[]; subagents?: SubagentEvent[]; live: boolean }) {
+// The runs API sometimes mirrors the final answer into the reasoning channel (local gpt-oss does
+// this — there is no separate analysis stream). When the "thinking" text is really just the answer
+// again, treat it as not-distinct so it is never rendered a second time.
+export function reasoningIsDistinct(reasoning?: string, answer?: string): boolean {
+  const r = (reasoning ?? "").replace(/\s+/g, " ").trim();
+  if (!r) return false;
+  const a = (answer ?? "").replace(/\s+/g, " ").trim();
+  if (!a) return true;                       // answer not in yet — show what we have
+  if (r === a || a.includes(r) || r.includes(a)) return false;  // one contains the other → dup
+  const n = Math.min(r.length, a.length);
+  let i = 0;
+  while (i < n && r[i] === a[i]) i++;
+  return i / n <= 0.9;                        // >90% shared prefix → treat as a duplicate
+}
+
+function Thinking({ reasoning, content, tools, subagents, live }: { reasoning?: string; content?: string; tools?: ToolEvent[]; subagents?: SubagentEvent[]; live: boolean }) {
   const [open, setOpen] = useState(true);
   const rows = pairTools(tools ?? []);
   const subs = pairSubagents(subagents ?? []);
+  const showReasoning = reasoningIsDistinct(reasoning, content);
   return (
     <div className={`thinking ${live ? "live" : ""}`}>
       <button className="thinking-head mono" onClick={() => setOpen((o) => !o)}>
@@ -412,7 +428,7 @@ function Thinking({ reasoning, tools, subagents, live }: { reasoning?: string; t
       </button>
       {open && (
         <div className="thinking-body">
-          {reasoning && <pre className="reasoning-text">{reasoning}</pre>}
+          {showReasoning && reasoning && <pre className="reasoning-text">{reasoning}</pre>}
           {subs.length > 0 && (
             <ul className="subagent-timeline">
               {subs.map((s, i) => (
