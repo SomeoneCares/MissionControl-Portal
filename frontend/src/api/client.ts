@@ -29,7 +29,13 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
+  if (!res.ok) {
+    // Surface the backend's own message (e.g. why Hermes rejected a task move) instead of a
+    // bare status code. Read the body once; fall back to the status if it isn't JSON.
+    let detail = "";
+    try { const j = await res.json(); detail = (j && (j.error || j.message)) || ""; } catch { /* not json */ }
+    throw new Error(detail || `${path} → HTTP ${res.status}`);
+  }
   return res.json() as Promise<T>;
 }
 
