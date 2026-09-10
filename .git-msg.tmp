@@ -1,0 +1,16 @@
+Fix HTTP 400 when sending an attachment-only chat message
+
+Pasting an image with no caption failed with "No user message found in
+input": the runs API reads input as messages, but we sent raw content parts
+with no role wrapper, and an empty caption left the text part blank.
+
+- Wrap multimodal turns in a proper user message (role + content parts) so the
+  gateway finds the user message.
+- Supply a neutral prompt ("Please take a look at the attached image." /
+  "Please review the attached file.") when the caption is empty, so an
+  attachment-only turn still carries user text.
+
+Note: whether the agent can actually read the image depends on the selected
+model being vision-capable; a text-only model will say it can't see images.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>

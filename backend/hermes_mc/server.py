@@ -474,16 +474,27 @@ class Handler(BaseHTTPRequestHandler):
 
         # attachments: text files are inlined into the prompt (works with any model); images are
         # sent as vision content (works where the model supports it).
-        base_text = messages[-1].get("content", "")
+        base_text = messages[-1].get("content", "") or ""
         atts = body.get("attachments") or []
         text_atts = [a for a in atts if a.get("kind") == "text" and a.get("text")]
         img_atts = [a for a in atts if a.get("kind") == "image" and a.get("dataUrl")]
         if text_atts:
             base_text += "\n\n" + "\n\n".join(
                 f"[Attached file: {a.get('name', 'file')}]\n{a['text']}" for a in text_atts)
+        # The runs API needs a non-empty user message. An attachment-only turn (e.g. a pasted
+        # image with no caption) would otherwise send a blank text part and be rejected with
+        # "No user message found in input" — supply a neutral prompt in that case.
+        if not base_text.strip():
+            if img_atts:
+                base_text = "Please take a look at the attached image."
+            elif atts:
+                base_text = "Please review the attached file."
         if img_atts:
-            user_input = [{"type": "text", "text": base_text}] + [
+            # multimodal turn: the runs API reads `input` as messages, so wrap the text +
+            # image parts in a user message (raw content parts alone read as "no user message").
+            parts = [{"type": "text", "text": base_text}] + [
                 {"type": "image_url", "image_url": {"url": a["dataUrl"]}} for a in img_atts]
+            user_input = [{"role": "user", "content": parts}]
         else:
             user_input = base_text
 
