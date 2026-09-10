@@ -30,7 +30,10 @@ function hash(s: string): number {
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
   return (h >>> 0) / 4294967295;
 }
-function isOrch(a: FleetAgent) { return a.agent === "orchestrator" || /orchestrat/i.test(a.agent); }
+// HQ is the ROOT agent (Hermes names it "default"; older hosts named it "orchestrator").
+// Profile agents like "pt-orchestrator"/"soc-orchestrator" are specialists, NOT the root — so
+// match the exact root name, never a substring.
+function isOrch(a: FleetAgent) { return a.agent === "default" || a.agent === "orchestrator"; }
 
 // Expanding concentric rings — fill the inner ring, then grow outward.
 function ringLayout(n: number, baseR: number, gap: number, spacing: number): { x: number; z: number }[] {

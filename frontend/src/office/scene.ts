@@ -47,8 +47,10 @@ const ASSIGNED = 0xee8a2f;  // task-assigned glow (orange)
 const BG = 0x0a0b10;        // cool near-black sky
 const RING = 0x8b95a3;      // silver armature, matching the grey monuments
 
+// HQ / core = the ROOT agent (Hermes "default"; older hosts "orchestrator"). Profile agents
+// such as "pt-orchestrator" are specialists — match the exact root name, not a substring.
 function isOrch(a: FleetAgent): boolean {
-  return a.agent === "orchestrator" || /orchestrat/i.test(a.agent);
+  return a.agent === "default" || a.agent === "orchestrator";
 }
 function isWorking(a: FleetAgent): boolean {
   return a.state === "EXECUTING" || a.state === "PROCESSING_NOW" || a.state === "TASK_IN_PROGRESS";
