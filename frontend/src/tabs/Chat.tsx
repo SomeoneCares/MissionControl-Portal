@@ -245,6 +245,17 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
           onDragLeave={() => setDropping(false)}
           onDrop={(e) => { e.preventDefault(); setDropping(false); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); }}
         >
+          <div className="chat-conv-head">
+            <span className="mono chat-conv-agent">
+              {activeProfile ? (fleetByName[activeProfile]?.name ?? activeProfile) : "Fleet"}
+              {turns.length > 0 && <span className="chat-conv-count"> · {turns.length} msg{turns.length === 1 ? "" : "s"}</span>}
+            </span>
+            <button className="chat-newchat mono" onClick={clearThread}
+                    disabled={turns.length === 0}
+                    title="Start a fresh conversation — clears this agent's thread so past turns don't bias the next one">
+              ✚ New chat
+            </button>
+          </div>
           <div className="chat-messages" ref={scrollRef}>
             {turns.length === 0 && (
               <div className="chat-empty mono">
@@ -310,9 +321,6 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
             </div>
           )}
           <div className="chat-input-row">
-            {turns.length > 0 && (
-              <button className="chat-clear mono" onClick={clearThread} title="Clear this conversation">clear</button>
-            )}
             <button className="chat-attach" onClick={() => fileRef.current?.click()} title="Attach files" aria-label="Attach files">＋</button>
             <input
               ref={fileRef}
