@@ -156,6 +156,14 @@ export interface ToolEvent {
   phase: "started" | "completed";
   name: string;
   preview: string;
+  duration?: number;   // seconds, on completed
+  error?: boolean;     // on completed
+}
+
+export interface TokenUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
 }
 
 // Hermes sends approval choices as plain strings (e.g. "once" | "session" | "deny"); older
@@ -166,13 +174,24 @@ export interface ApprovalReq {
   text: string;
 }
 
+export interface SubagentEvent {
+  phase: "start" | "complete";
+  name: string;
+  goal?: string;
+  status?: string;
+  duration?: number;
+  tokens?: number;
+  id?: string;
+}
+
 export interface ChatHandlers {
   onDelta: (t: string) => void;
   onReasoning?: (text: string) => void;
   onTool?: (t: ToolEvent) => void;
+  onSubagent?: (s: SubagentEvent) => void;
   onRun?: (runId: string) => void;
   onApproval?: (a: ApprovalReq) => void;
-  onDone: () => void;
+  onDone: (usage?: TokenUsage) => void;
   onError: (e: string) => void;
 }
 
@@ -222,10 +241,11 @@ export function chatStream(
             if (obj.delta) handlers.onDelta(obj.delta);
             else if (obj.reasoning !== undefined) handlers.onReasoning?.(obj.reasoning);
             else if (obj.tool) handlers.onTool?.(obj.tool);
+            else if (obj.subagent) handlers.onSubagent?.(obj.subagent);
             else if (obj.run) handlers.onRun?.(obj.run);
             else if (obj.approval) handlers.onApproval?.(obj.approval);
             else if (obj.error) handlers.onError(obj.error);
-            else if (obj.done) handlers.onDone();
+            else if (obj.done) handlers.onDone(obj.usage);
           } catch {
             /* ignore malformed frame */
           }

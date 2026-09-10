@@ -583,12 +583,26 @@ class Handler(BaseHTTPRequestHandler):
                                    "preview": ev.get("preview", "")}})
                 elif t == "tool.completed":
                     send({"tool": {"phase": "completed", "name": ev.get("tool") or ev.get("name") or "",
-                                   "preview": ev.get("preview", "")}})
+                                   "preview": ev.get("preview", ""),
+                                   "duration": ev.get("duration"), "error": bool(ev.get("error"))}})
+                elif t in ("subagent.start", "subagent.started"):
+                    send({"subagent": {"phase": "start",
+                                       "name": ev.get("role") or ev.get("name") or ev.get("assignee") or ev.get("profile") or "worker",
+                                       "goal": ev.get("goal") or ev.get("preview") or ev.get("task") or "",
+                                       "id": ev.get("delegation_id") or ev.get("child_session_id") or ev.get("id") or ""}})
+                elif t in ("subagent.complete", "subagent.completed"):
+                    usage = ev.get("usage") or {}
+                    send({"subagent": {"phase": "complete",
+                                       "name": ev.get("role") or ev.get("name") or ev.get("assignee") or ev.get("profile") or "worker",
+                                       "status": ev.get("status") or ("failed" if ev.get("error") else "completed"),
+                                       "duration": ev.get("duration"),
+                                       "tokens": ev.get("tokens") or usage.get("total_tokens"),
+                                       "id": ev.get("delegation_id") or ev.get("child_session_id") or ev.get("id") or ""}})
                 elif t == "approval.request":
                     send({"approval": {"choices": ev.get("choices", []), "text": ev.get("preview", "")}})
                 elif t.startswith("run."):
                     if any(s in t for s in ("completed", "failed", "interrupted", "stopping")):
-                        send({"done": True, "status": t})
+                        send({"done": True, "status": t, "usage": ev.get("usage")})
                         break
         except (BrokenPipeError, ConnectionResetError):
             return

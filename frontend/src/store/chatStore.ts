@@ -2,15 +2,17 @@
 // navigation, and are mirrored to localStorage so they survive a page reload too. Per-viewer,
 // per-browser: it is a convenience history, not shared state.
 
-import type { ChatMessage, ToolEvent, ApprovalReq } from "../api/client";
+import type { ChatMessage, ToolEvent, ApprovalReq, TokenUsage, SubagentEvent } from "../api/client";
 
 export interface Turn extends ChatMessage {
   streaming?: boolean;
   reasoning?: string;
   tools?: ToolEvent[];
+  subagents?: SubagentEvent[];
   atts?: { name: string; kind: string }[];
   runId?: string;
   approval?: ApprovalReq | null;
+  usage?: TokenUsage;
   ts?: number;
 }
 

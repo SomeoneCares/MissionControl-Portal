@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { State, HealthInfo, Agent } from "../types";
-import { api, chatStream, type ChatMessage, type ChatAgents, type ToolEvent, type Attachment, type ApprovalChoice } from "../api/client";
+import { api, chatStream, type ChatMessage, type ChatAgents, type ToolEvent, type Attachment, type ApprovalChoice, type SubagentEvent } from "../api/client";
 import { chatStore, type Turn } from "../store/chatStore";
 
 // Approval choices arrive as bare strings (Hermes) or objects (older paths). Normalise both to a
@@ -143,11 +143,18 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
     aborts[key] = chatStream(payload, activeProfile, {
       onRun: (runId) => chatStore.patchLast(key, (last) => { last.runId = runId; }),
       onDelta: (d) => chatStore.patchLast(key, (last) => { if (last.streaming) last.content += d; }),
-      onReasoning: (text) => chatStore.patchLast(key, (last) => { last.reasoning = text; }),
+      onReasoning: (text) => chatStore.patchLast(key, (last) => {
+        // accumulate reasoning blocks: keep the full chain of thought rather than replacing.
+        const prev = last.reasoning || "";
+        if (!prev) last.reasoning = text;
+        else if (text.startsWith(prev) || prev.endsWith(text)) last.reasoning = text.length >= prev.length ? text : prev;
+        else last.reasoning = prev + "\n\n" + text;
+      }),
       onTool: (t) => chatStore.patchLast(key, (last) => { last.tools = [...(last.tools ?? []), t]; }),
+      onSubagent: (s) => chatStore.patchLast(key, (last) => { last.subagents = [...(last.subagents ?? []), s]; }),
       onApproval: (a) => chatStore.patchLast(key, (last) => { last.approval = a; }),
-      onDone: () => {
-        chatStore.patchLast(key, (last) => { last.streaming = false; });
+      onDone: (usage) => {
+        chatStore.patchLast(key, (last) => { last.streaming = false; if (usage) last.usage = usage; });
         chatStore.persist();
         delete aborts[key];
       },
@@ -268,8 +275,8 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
                 <span className="bubble-role mono">
                   {t.role === "user" ? "you" : (activeProfile ? (fleetByName[activeProfile]?.name ?? "hermes") : "hermes")}
                 </span>
-                {t.role === "assistant" && (t.reasoning || (t.tools && t.tools.length > 0)) && (
-                  <Thinking reasoning={t.reasoning} tools={t.tools} live={!!t.streaming} />
+                {t.role === "assistant" && (t.reasoning || (t.tools && t.tools.length > 0) || (t.subagents && t.subagents.length > 0)) && (
+                  <Thinking reasoning={t.reasoning} tools={t.tools} subagents={t.subagents} live={!!t.streaming} />
                 )}
                 {(t.content || t.role === "user" || !t.streaming) && (
                   <div className="bubble-body">
@@ -288,6 +295,13 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
                 )}
                 {t.role === "assistant" && t.streaming && !t.content && !t.reasoning && (
                   <div className="bubble-body thinking-dots"><span /><span /><span /></div>
+                )}
+                {t.role === "assistant" && !t.streaming && t.usage && (t.usage.total_tokens || t.usage.input_tokens) && (
+                  <div className="turn-usage mono">
+                    {(t.usage.total_tokens ?? ((t.usage.input_tokens ?? 0) + (t.usage.output_tokens ?? 0))).toLocaleString()} tokens
+                    {t.usage.input_tokens != null && t.usage.output_tokens != null
+                      ? ` (${t.usage.input_tokens.toLocaleString()} in · ${t.usage.output_tokens.toLocaleString()} out)` : ""}
+                  </div>
                 )}
                 {t.role === "assistant" && t.approval && (
                   <div className="approval">
@@ -352,26 +366,77 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
   );
 }
 
-function Thinking({ reasoning, tools, live }: { reasoning?: string; tools?: ToolEvent[]; live: boolean }) {
+interface ToolRow { name: string; command: string; status: "running" | "done" | "error"; duration?: number; }
+function pairTools(tools: ToolEvent[]): ToolRow[] {
+  const rows: ToolRow[] = [];
+  for (const t of tools) {
+    if (t.phase === "started") {
+      rows.push({ name: t.name, command: t.preview, status: "running" });
+    } else {
+      const r = [...rows].reverse().find((x) => x.name === t.name && x.status === "running");
+      if (r) { r.status = t.error ? "error" : "done"; r.duration = t.duration; if (!r.command && t.preview) r.command = t.preview; }
+      else rows.push({ name: t.name, command: t.preview, status: t.error ? "error" : "done", duration: t.duration });
+    }
+  }
+  return rows;
+}
+
+function pairSubagents(subs: SubagentEvent[]): { name: string; goal: string; status: string; duration?: number; tokens?: number }[] {
+  const rows: { name: string; goal: string; status: string; duration?: number; tokens?: number }[] = [];
+  for (const s of subs) {
+    if (s.phase === "start") rows.push({ name: s.name, goal: s.goal || "", status: "running" });
+    else {
+      const r = [...rows].reverse().find((x) => x.name === s.name && x.status === "running");
+      if (r) { r.status = s.status || "completed"; r.duration = s.duration; r.tokens = s.tokens; }
+      else rows.push({ name: s.name, goal: s.goal || "", status: s.status || "completed", duration: s.duration, tokens: s.tokens });
+    }
+  }
+  return rows;
+}
+
+function Thinking({ reasoning, tools, subagents, live }: { reasoning?: string; tools?: ToolEvent[]; subagents?: SubagentEvent[]; live: boolean }) {
   const [open, setOpen] = useState(true);
+  const rows = pairTools(tools ?? []);
+  const subs = pairSubagents(subagents ?? []);
   return (
     <div className={`thinking ${live ? "live" : ""}`}>
       <button className="thinking-head mono" onClick={() => setOpen((o) => !o)}>
         <span className="thinking-icon">{live ? "◐" : "◑"}</span>
         {live ? "thinking…" : "thought process"}
+        {subs.length > 0 && <span className="thinking-count"> · {subs.length} delegated</span>}
+        {rows.length > 0 && <span className="thinking-count"> · {rows.length} tool{rows.length === 1 ? "" : "s"}</span>}
         <span className="thinking-toggle">{open ? "hide" : "show"}</span>
       </button>
       {open && (
         <div className="thinking-body">
-          {reasoning && <p className="reasoning-text">{reasoning}</p>}
-          {tools && tools.length > 0 && (
+          {reasoning && <pre className="reasoning-text">{reasoning}</pre>}
+          {subs.length > 0 && (
+            <ul className="subagent-timeline">
+              {subs.map((s, i) => (
+                <li key={i} className={`subagent-ev ${s.status === "running" ? "running" : s.status.includes("fail") ? "error" : "done"}`}>
+                  <span className="subagent-icon">⇩</span>
+                  <span className="mono subagent-name">delegated → {s.name}</span>
+                  {s.goal && <span className="subagent-goal">{s.goal}</span>}
+                  <span className="subagent-meta mono">
+                    {s.status === "running" ? "running…" : s.status}
+                    {typeof s.duration === "number" ? ` · ${s.duration.toFixed(1)}s` : ""}
+                    {typeof s.tokens === "number" ? ` · ${s.tokens.toLocaleString()} tok` : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {rows.length > 0 && (
             <ul className="tool-timeline">
-              {tools.map((t, i) => (
-                <li key={i} className={`tool-ev ${t.phase}`}>
-                  <span className="tool-dot" />
-                  <span className="mono tool-name">{t.name}</span>
-                  <span className="mono tool-phase">{t.phase}</span>
-                  {t.preview && <span className="tool-preview">{t.preview}</span>}
+              {rows.map((r, i) => (
+                <li key={i} className={`tool-ev ${r.status}`}>
+                  <span className={`tool-dot ${r.status}`} />
+                  <span className="mono tool-name">{r.name}</span>
+                  {r.command && <code className="tool-cmd">{r.command}</code>}
+                  <span className="tool-meta mono">
+                    {r.status === "running" ? "running…" : r.status === "error" ? "failed" : "ok"}
+                    {typeof r.duration === "number" ? ` · ${r.duration.toFixed(2)}s` : ""}
+                  </span>
                 </li>
               ))}
             </ul>
