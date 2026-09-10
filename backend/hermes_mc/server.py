@@ -266,8 +266,11 @@ class DataProvider:
             s = agent_state.get((code or "").lower())
             if s:
                 a["state"] = s
-        if self._working:
-            data["working_agents"] = sorted(set(data.get("working_agents", [])) | self._working)
+        # "active now" = agents running a kanban task + the portal's own in-flight chat runs.
+        executing = {code for code, s in agent_state.items() if s == "EXECUTING"}
+        working = set(data.get("working_agents", [])) | self._working | executing
+        if working:
+            data["working_agents"] = sorted(working)
             for a in data.get("fleet", []):
                 if a.get("agent") in self._working:
                     a["state"] = "EXECUTING"
