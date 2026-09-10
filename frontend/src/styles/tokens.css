@@ -3,31 +3,32 @@
    dark redefines only the tokens. Components style through tokens only. */
 
 :root {
-  --ground: #f4efe3;
-  --panel: #fbf7ee;
-  --panel-2: #efe8d9;
-  --ink: #1f1810;
-  --ink-soft: #4e4437;
-  --muted: #7c6e5c;
-  --line: #ddd3c0;
-  --line-soft: #e8e0d0;
-  --ember: #c2481b;
-  --ember-soft: #e0794a;
-  --ember-bg: #f7e6dd;
-  --spot: #0e7c8b;
-  --ok: #3e6b47;
-  --ok-bg: #e6efe5;
-  --warn: #8a6410;
-  --warn-bg: #f7eed9;
-  --danger: #a3352f;
-  --danger-bg: #f6e4e2;
+  /* the original portal palette (oklch) */
+  --ground: oklch(0.96 0.012 75);
+  --panel: oklch(0.93 0.012 75);
+  --panel-2: oklch(0.89 0.014 70);
+  --ink: oklch(0.16 0.012 50);
+  --ink-soft: oklch(0.30 0.015 55);
+  --muted: oklch(0.45 0.018 60);
+  --line: oklch(0.85 0.012 70);
+  --line-soft: oklch(0.89 0.012 72);
+  --ember: oklch(0.66 0.22 38);
+  --ember-soft: oklch(0.78 0.16 50);
+  --ember-bg: oklch(0.66 0.22 38 / 0.1);
+  --spot: oklch(0.62 0.16 200);
+  --ok: oklch(0.55 0.12 150);
+  --ok-bg: oklch(0.55 0.12 150 / 0.12);
+  --warn: oklch(0.62 0.14 75);
+  --warn-bg: oklch(0.62 0.14 75 / 0.12);
+  --danger: oklch(0.58 0.2 25);
+  --danger-bg: oklch(0.58 0.2 25 / 0.1);
 
   --font-display: "Instrument Serif", "Times New Roman", serif;
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
   --radius: 14px;
-  --radius-lg: 20px;
+  --radius-lg: 24px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -78,13 +79,40 @@
 
 body {
   margin: 0;
-  background: var(--ground);
+  background-color: var(--ground);
   color: var(--ink);
   font-family: var(--font-sans);
   font-weight: 400;
   line-height: 1.5;
+  font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;
+  /* the original's warm ground: an ember glow top-right, an ink wash bottom-left */
+  background-image:
+    radial-gradient(900px 600px at 100% 0%, oklch(0.66 0.22 38 / 0.20), transparent 60%),
+    radial-gradient(700px 500px at 0% 100%, oklch(0.16 0.012 50 / 0.08), transparent 60%),
+    linear-gradient(180deg, oklch(0.97 0.012 75) 0%, oklch(0.94 0.014 70) 100%);
+  background-attachment: fixed;
+  min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
 }
+
+/* the signature dot-grid texture, masked to fade at the edges */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image: radial-gradient(oklch(0.16 0.012 50 / 0.055) 1px, transparent 1px);
+  background-size: 20px 20px;
+  -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 85%);
+          mask-image: radial-gradient(ellipse at center, black 30%, transparent 85%);
+}
+
+#root { position: relative; z-index: 1; }
+
+::selection { background: var(--ember); color: oklch(0.97 0.012 75); }
 
 .mono { font-family: var(--font-mono); }
 .display { font-family: var(--font-display); font-weight: 400; }
