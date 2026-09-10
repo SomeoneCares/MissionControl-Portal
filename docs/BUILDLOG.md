@@ -40,7 +40,20 @@ Newest first. Each entry: what was built, and what proves it works.
   ok, v0.21.0), `/api/state` (9 agents, real health), board create/list round-trip.
 - Git initialised; foundation committed.
 
+## 2026-09-10 — front end live, 5 tabs, real streaming chat
+
+- Vite + React + TS front end (hand-authored, no Tailwind; token CSS carrying the identity).
+- Typed API client, relative URLs only (portable), SSE live-state + polling fallback.
+- Tabs live: **Overview** (hero + health + fleet + routing pathology + host meters + activity),
+  **Agents** (card grid, detail drawer, 27 real gateway toolsets), **Tasks** (full kanban CRUD on
+  the portal board), **Chat** (real streaming agent turns via `/api/chat` → gateway).
+- **Fleet fix**: `fleet_agents()` unions root orchestrator + profiles + log-only agents; role
+  display only accepts a real markdown heading.
+- **Proven on TWO real hosts from one codebase**: WSL (10 agents incl. orchestrator, gateway live,
+  chat streaming) and the server (8 agents, 405 runs, 3 failures, 4 platforms, routing pathology).
+  Deployed to the server at `/opt/hermes-mc`, running on `:51780`.
+
 ## Next
-- Define `docs/state-contract.md` — the typed payload shape, shared front/back.
-- P3: front-end foundation — Vite + React + TS, design tokens (ink/cream/ember), routing,
-  the typed API client, then the Overview and Agents tabs against live `/api/state`.
+- Remaining tabs: Runs (gateway run events), Content (content/ dir), Schedule (cron/jobs.json),
+  Office (skyline default + Armillary switch, both generated from live fleet).
+- Then: remote-mode bridge (P2), installer (P7), portal auth.
