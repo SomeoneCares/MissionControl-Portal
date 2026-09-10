@@ -23,7 +23,6 @@ export interface SceneController {
 const EMBER = 0xe25822;
 const SOFT = 0xf59e6b;
 const INK = 0x1a1410;
-const INK_2 = 0x241a13;
 const SPOTLIGHT = 0x00e5ff; // active/working — the cyan the original used for live work
 const BRASS = 0x9a7448;
 
@@ -103,9 +102,11 @@ function baseScene(canvas: HTMLCanvasElement): {
 } {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.25;
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(INK);
-  scene.fog = new THREE.FogExp2(INK, 0.028);
+  scene.fog = new THREE.FogExp2(INK, 0.012);
   const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 400);
 
   // The original skyline controls: drag to orbit, scroll to zoom. A gentle auto-rotate runs
@@ -144,14 +145,22 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[]): Sc
   camera.position.set(0, 8, 18);
   controls.target.set(0, 3, 0);
 
-  scene.add(new THREE.AmbientLight(0x40301f, 0.6));
-  const key = new THREE.PointLight(EMBER, 2.2, 40); key.position.set(0, 8, 0); scene.add(key);
-  const rim = new THREE.DirectionalLight(SOFT, 0.7); rim.position.set(-10, 12, 8); scene.add(rim);
-  scene.add(new THREE.HemisphereLight(0x40301f, 0x0a0705, 0.5));
+  scene.add(new THREE.AmbientLight(0x6a4a2c, 0.7));
+  const key = new THREE.PointLight(EMBER, 3.4, 60); key.position.set(0, 12, 0); scene.add(key);
+  const rim = new THREE.DirectionalLight(SOFT, 1.1); rim.position.set(-10, 14, 8); scene.add(rim);
+  const fill = new THREE.DirectionalLight(0x8a5a3a, 0.6); fill.position.set(12, 8, -8); scene.add(fill);
+  scene.add(new THREE.HemisphereLight(0x5a4230, 0x140d08, 0.6));
+
+  // warm horizon glow so the towers read against a lit sky, like the original
+  const sky = new THREE.Mesh(
+    new THREE.SphereGeometry(140, 32, 16, 0, Math.PI * 2, Math.PI * 0.42, Math.PI * 0.2),
+    new THREE.MeshBasicMaterial({ color: 0x6e3417, side: THREE.BackSide, fog: false }));
+  scene.add(sky);
+  const horizon = glowSprite(glow, 120, EMBER, 0.28); horizon.position.set(0, 0, -60); scene.add(horizon);
 
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(200, 200),
-    new THREE.MeshStandardMaterial({ color: INK_2, roughness: 0.96 }));
+    new THREE.PlaneGeometry(400, 400),
+    new THREE.MeshStandardMaterial({ color: 0x241811, roughness: 0.9, metalness: 0.15 }));
   ground.rotation.x = -Math.PI / 2; scene.add(ground);
   const grid = new THREE.GridHelper(80, 80, 0x2a1f17, 0x1a130d);
   (grid.material as THREE.Material).opacity = 0.35; (grid.material as THREE.Material).transparent = true;
@@ -169,20 +178,24 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[]): Sc
     const w = hq ? 3.2 : 1.6 + hash(a.agent) * 0.8;
     const body = new THREE.Mesh(
       new THREE.BoxGeometry(w, h, w),
-      new THREE.MeshStandardMaterial({ color: hq ? 0x241a13 : 0x1d160f, roughness: 0.85, metalness: 0.2 }));
+      new THREE.MeshStandardMaterial({
+        color: hq ? 0x3a2a1c : 0x2c2016, roughness: 0.7, metalness: 0.35,
+        emissive: 0x1a0f08, emissiveIntensity: 0.6,
+      }));
     body.position.set(x, h / 2, z);
     scene.add(body);
 
     // windows as a point cloud on the four faces; lit share ~ activity
-    const cols = Math.max(2, Math.round(w * 2));
-    const rows = Math.max(3, Math.round(h * 1.6));
+    const cols = Math.max(3, Math.round(w * 3));
+    const rows = Math.max(5, Math.round(h * 2.2));
     const pts: number[] = [];
     const colors: number[] = [];
     const working = isWorking(a);
-    const litShare = working ? 0.9 : 0.18 + (a.tasksToday / maxTasks) * 0.4;
-    // original palette: cyan spotlight when the agent is live, ember otherwise
-    const cLit = new THREE.Color(working ? SPOTLIGHT : hq ? EMBER : SOFT);
-    const cDark = new THREE.Color(0x3a2c20);
+    const litShare = working ? 0.92 : 0.4 + (a.tasksToday / maxTasks) * 0.4;
+    // original palette: cyan spotlight when the agent is live, ember otherwise. Brighter than
+    // the face colour so tone mapping makes them glow.
+    const cLit = new THREE.Color(working ? SPOTLIGHT : hq ? EMBER : SOFT).multiplyScalar(1.6);
+    const cDark = new THREE.Color(0x5a3f28);
     for (let f = 0; f < 4; f++) {
       const ang = (f / 4) * Math.PI * 2;
       const nx = Math.cos(ang), nz = Math.sin(ang);
@@ -203,8 +216,8 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[]): Sc
     geo.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
     geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
     const windows = new THREE.Points(geo, new THREE.PointsMaterial({
-      size: 0.14, vertexColors: true, transparent: true, opacity: 0.95,
-      blending: THREE.AdditiveBlending, depthWrite: false,
+      size: 0.2, vertexColors: true, transparent: true, opacity: 1,
+      blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
     }));
     scene.add(windows);
 
@@ -266,10 +279,11 @@ export function buildArmillary(canvas: HTMLCanvasElement, fleet: FleetAgent[]): 
   controls.target.set(0, 0, 0);
   controls.autoRotateSpeed = 0.8;
 
-  scene.add(new THREE.AmbientLight(0x3a2a1c, 0.6));
-  const core = new THREE.PointLight(0xffa265, 3.0, 40); scene.add(core);
+  scene.add(new THREE.AmbientLight(0x3a2a1c, 0.7));
+  const core = new THREE.PointLight(0xffa265, 4.5, 50); scene.add(core);
 
-  const sun = new THREE.Mesh(new THREE.SphereGeometry(0.62, 32, 32), new THREE.MeshBasicMaterial({ color: 0xffb37a }));
+  const sun = new THREE.Mesh(new THREE.SphereGeometry(0.62, 32, 32),
+    new THREE.MeshBasicMaterial({ color: 0xffc79a, toneMapped: false }));
   scene.add(sun);
   const sunGlow = glowSprite(glow, 5.6, 0xf08040, 0.9); scene.add(sunGlow);
   const orch = fleet.find(isOrch);
