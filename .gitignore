@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+*.local
+
+# Portal runtime data (never commit real fleet data or secrets)
+*.db
+*.env
+.env
+.hermes-mc/
+
+# Reference prior-art (kept locally, not part of the shipped project)
+reference/
+
+# OS
+.DS_Store
+Thumbs.db
+reference/
+.git-commit-msg.tmp
