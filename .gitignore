@@ -27,3 +27,4 @@ reference/
 # build/run artifacts
 frontend/build.log
 backend/server.log
+.git-msg.tmp
