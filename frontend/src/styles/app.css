@@ -351,3 +351,17 @@
 .content-body pre code { background: none; padding: 0; }
 .content-body a { color: var(--spot); }
 .content-body ul { padding-left: 20px; }
+
+/* ===== office ===== */
+.office { display: flex; flex-direction: column; gap: 16px; }
+.office-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; }
+.office-title { font-size: 40px; line-height: 0.98; letter-spacing: -0.02em; margin: 6px 0 0; }
+.office-sub { font-size: 13px; margin: 10px 0 0; max-width: 60ch; }
+.office-controls { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+.view-toggle { display: flex; gap: 2px; padding: 3px; background: var(--panel-2); border-radius: 999px; border: 1px solid var(--line); }
+.view-btn { padding: 7px 16px; border-radius: 999px; border: none; background: transparent; color: var(--muted); cursor: pointer; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+.view-btn.active { background: var(--ember); color: #fff; }
+.office-stats { display: flex; gap: 16px; font-size: 11px; color: var(--muted); }
+.office-stage { position: relative; padding: 0; overflow: hidden; background: #0e0a06; height: 62vh; min-height: 420px; }
+.office-canvas { display: block; width: 100%; height: 100%; }
+.office-hint { position: absolute; left: 16px; bottom: 12px; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(247,240,225,0.35); pointer-events: none; }

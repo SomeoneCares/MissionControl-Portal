@@ -8,6 +8,7 @@ import { Runs } from "./tabs/Runs";
 import { Tasks } from "./tabs/Tasks";
 import { Content } from "./tabs/Content";
 import { Schedule } from "./tabs/Schedule";
+import { Office } from "./tabs/Office";
 import "./styles/app.css";
 
 const TABS = ["Overview", "Agents", "Chat", "Runs", "Tasks", "Office", "Content", "Schedule"] as const;
@@ -63,12 +64,7 @@ export function App() {
         {tab === "Tasks" && <Tasks />}
         {tab === "Content" && <Content />}
         {tab === "Schedule" && <Schedule />}
-        {state && tab === "Office" && (
-          <div className="placeholder">
-            <span className="eyebrow">{tab}</span>
-            <p className="mono">The skyline + Armillary office is the last tab in the build.</p>
-          </div>
-        )}
+        {state && tab === "Office" && <Office state={state} />}
       </main>
     </div>
   );
