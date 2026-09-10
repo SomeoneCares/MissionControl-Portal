@@ -76,6 +76,18 @@ Requires a gateway restart (`hermes gateway restart`) to take effect.
   `kanban_create` to `soc-analyst` / `soc-hunter` / `soc-assessment` /
   `soc-response`; the routing table now lists the profile name per request type.
 
+### 1c. Durable, shared artifacts (each kanban task has an isolated ephemeral scratch workspace)
+
+A kanban task runs in its own scratch workspace that is not shared between stages
+and does not survive — the first live run's `pt-reporter` generated a PDF there,
+failed to attach it, blocked, and the file was lost. Both ROUTING files now
+require workers to read inputs and write deliverables to **absolute paths under a
+shared durable folder** (pentest: `~/pentest-fleet/content/<engagement>/`; SOC:
+the `soc_write` case store or `~/soc-fleet/cases/<case>/`), which the orchestrator
+names in every `kanban_create` body. Workers must not rely on the scratch
+workspace or base64 `kanban_attach`. For pentest this folder is what the portal
+Content tab points at, so deliverables show up there.
+
 ### Verified end-to-end
 
 Assigning a task to a profile (via `kanban_create` or `hermes kanban create`)
