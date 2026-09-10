@@ -253,10 +253,11 @@ class LocalSource:
         """Run history as {agent_name, task_description, model_used, status, created_at} rows.
 
         Source order: a legacy ``agent-logs.db`` (older Hermes / the .177 server) if present;
-        otherwise Hermes 0.21's real stores — interactive/API runs from ``state.db`` sessions
-        (all attributed to the root ``default`` agent) plus delegated per-specialist executions
-        from ``kanban.db`` task_runs. Verified against the live schemas + the /api/sessions API,
-        which omits profile_name (hence the DB read for per-agent attribution)."""
+        otherwise Hermes 0.21's real stores — interactive/API runs from every profile's own
+        ``state.db`` (the root DB holds the default agent; each multiplex profile has its own under
+        ``profiles/<name>/state.db``) plus delegated executions from ``kanban.db`` task_runs. The
+        per-profile DBs are why each agent's runs are attributed correctly rather than all to
+        ``default`` (the /api/sessions API omits profile_name, hence the direct DB reads)."""
         return self._history_rows(limit)
 
     def _history_rows(self, limit: Optional[int] = None) -> list[dict]:
@@ -276,36 +277,51 @@ class LocalSource:
         except sqlite3.Error:
             return []
 
+    def _state_dbs(self) -> list[Path]:
+        """Every Hermes ``state.db``: the root (the ``default`` profile) plus each multiplex
+        profile's own DB at ``profiles/<name>/state.db``. Hermes records each profile's sessions,
+        model usage and tokens in *its own* database — the root DB only holds the default agent —
+        so per-agent run history and the inference ledger must aggregate across all of them."""
+        dbs: list[Path] = []
+        root = self.home / "state.db"
+        if root.exists():
+            dbs.append(root)
+        proot = self.home / "profiles"
+        if proot.is_dir():
+            for d in sorted(proot.iterdir()):
+                db = d / "state.db"
+                if db.exists():
+                    dbs.append(db)
+        return dbs
+
     def _session_rows(self) -> list[dict]:
-        """Interactive / API / desktop runs from state.db sessions → run-like rows."""
-        state_db = self.home / "state.db"
-        if not state_db.exists():
-            return []
-        try:
-            with _ro_connect(state_db) as con:
-                cols = {r[1] for r in con.execute("PRAGMA table_info(sessions)")}
-                if "profile_name" not in cols:
-                    return []
-                sel = con.execute(
-                    "SELECT profile_name, model, source, message_count, ended_at, end_reason, "
-                    "last_activity_description, title, started_at "
-                    "FROM sessions WHERE COALESCE(archived,0)=0 ORDER BY started_at DESC").fetchall()
-        except sqlite3.Error:
-            return []
+        """Interactive / API / desktop runs from every profile's state.db sessions → run rows."""
         out = []
-        for r in sel:
-            end = str(r["end_reason"] or "").strip().lower()
-            status = ("failed" if end in ("error", "failed", "crashed")
-                      else ("completed" if r["ended_at"] else "active"))
-            src = str(r["source"] or "").strip()
-            desc = str(r["last_activity_description"] or r["title"] or (f"{src} session" if src else "session")).strip()
-            out.append({
-                "agent_name": (str(r["profile_name"] or "default").strip().lower() or "default"),
-                "task_description": desc[:200],
-                "model_used": str(r["model"] or "").strip(),
-                "status": status,
-                "created_at": _epoch_iso(r["started_at"]),
-            })
+        for state_db in self._state_dbs():
+            try:
+                with _ro_connect(state_db) as con:
+                    cols = {r[1] for r in con.execute("PRAGMA table_info(sessions)")}
+                    if "profile_name" not in cols:
+                        continue
+                    sel = con.execute(
+                        "SELECT profile_name, model, source, message_count, ended_at, end_reason, "
+                        "last_activity_description, title, started_at "
+                        "FROM sessions WHERE COALESCE(archived,0)=0 ORDER BY started_at DESC").fetchall()
+            except sqlite3.Error:
+                continue
+            for r in sel:
+                end = str(r["end_reason"] or "").strip().lower()
+                status = ("failed" if end in ("error", "failed", "crashed")
+                          else ("completed" if r["ended_at"] else "active"))
+                src = str(r["source"] or "").strip()
+                desc = str(r["last_activity_description"] or r["title"] or (f"{src} session" if src else "session")).strip()
+                out.append({
+                    "agent_name": (str(r["profile_name"] or "default").strip().lower() or "default"),
+                    "task_description": desc[:200],
+                    "model_used": str(r["model"] or "").strip(),
+                    "status": status,
+                    "created_at": _epoch_iso(r["started_at"]),
+                })
         return out
 
     def _taskrun_rows(self) -> list[dict]:
@@ -339,32 +355,36 @@ class LocalSource:
         return out
 
     def _model_usage_totals(self) -> tuple[list[dict], int, int]:
-        """(model_usage rows, input_tokens, output_tokens) from state.db session_model_usage —
-        Hermes 0.21's authoritative per-model usage. Empty tuple when the table is absent."""
-        state_db = self.home / "state.db"
-        if not state_db.exists():
+        """(model_usage rows, input_tokens, output_tokens) from session_model_usage across every
+        profile's state.db — Hermes 0.21's authoritative per-model usage. Empty when absent."""
+        agg: dict[str, dict[str, int]] = {}
+        for state_db in self._state_dbs():
+            try:
+                with _ro_connect(state_db) as con:
+                    tables = {r[0] for r in con.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'")}
+                    if "session_model_usage" not in tables:
+                        continue
+                    sel = con.execute(
+                        "SELECT model, COALESCE(SUM(input_tokens),0) itok, "
+                        "COALESCE(SUM(output_tokens),0) otok, COALESCE(SUM(api_call_count),0) calls "
+                        "FROM session_model_usage GROUP BY model").fetchall()
+            except sqlite3.Error:
+                continue
+            for r in sel:
+                a = agg.setdefault(str(r["model"] or ""), {"calls": 0, "itok": 0, "otok": 0})
+                a["calls"] += int(r["calls"] or 0)
+                a["itok"] += int(r["itok"] or 0)
+                a["otok"] += int(r["otok"] or 0)
+        if not agg:
             return [], 0, 0
-        try:
-            with _ro_connect(state_db) as con:
-                tables = {r[0] for r in con.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'")}
-                if "session_model_usage" not in tables:
-                    return [], 0, 0
-                sel = con.execute(
-                    "SELECT model, COUNT(DISTINCT session_id) sess, "
-                    "COALESCE(SUM(input_tokens),0) itok, COALESCE(SUM(output_tokens),0) otok, "
-                    "COALESCE(SUM(api_call_count),0) calls "
-                    "FROM session_model_usage GROUP BY model").fetchall()
-        except sqlite3.Error:
-            return [], 0, 0
-        total_calls = sum(int(r["calls"]) for r in sel) or 0
-        tin = tout = 0
-        usage = []
-        for r in sel:
-            tin += int(r["itok"]); tout += int(r["otok"])
-            usage.append({"name": str(r["model"] or ""), "count": int(r["calls"]),
-                          "pct": round(int(r["calls"]) / total_calls * 100) if total_calls else 0})
+        total_calls = sum(a["calls"] for a in agg.values()) or 0
+        usage = [{"name": m, "count": a["calls"],
+                  "pct": round(a["calls"] / total_calls * 100) if total_calls else 0}
+                 for m, a in agg.items()]
         usage.sort(key=lambda u: (-u["count"], u["name"]))
+        tin = sum(a["itok"] for a in agg.values())
+        tout = sum(a["otok"] for a in agg.values())
         return usage, tin, tout
 
     # -- gateway / platform health -----------------------------------------
@@ -406,25 +426,20 @@ class LocalSource:
     def sessions(self) -> dict:
         """Token totals across sessions. Uses Hermes 0.21's ``session_model_usage`` for input/
         output tokens and ``sessions`` for the message count."""
-        state_db = self.home / "state.db"
         totals = {"input": 0, "output": 0, "messages": 0}
-        if not state_db.exists():
-            return {"totals": totals}
         _, tin, tout = self._model_usage_totals()
         totals["input"], totals["output"] = tin, tout
-        try:
-            with _ro_connect(state_db) as con:
-                tables = {r[0] for r in con.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'")}
-                if "sessions" in tables:
+        for state_db in self._state_dbs():
+            try:
+                with _ro_connect(state_db) as con:
                     cols = {r[1] for r in con.execute("PRAGMA table_info(sessions)")}
                     if "message_count" in cols:
                         row = con.execute(
                             "SELECT COALESCE(SUM(message_count),0) FROM sessions "
                             "WHERE COALESCE(archived,0)=0").fetchone()
-                        totals["messages"] = int(row[0] or 0)
-        except sqlite3.Error:
-            pass
+                        totals["messages"] += int(row[0] or 0)
+            except sqlite3.Error:
+                pass
         return {"totals": totals}
 
     # -- scheduled jobs (Hermes cron) --------------------------------------
