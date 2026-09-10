@@ -48,6 +48,7 @@ class DataProvider:
         self.admin = AgentAdmin(cfg.hermes_home) if cfg.is_local else None
         self._cache: dict = {"at": 0.0, "data": None}
         self._chat_routes: dict | None = None   # cached per-agent route resolution
+        self._working: set[str] = set()          # agents with an in-flight run right now
 
     def capabilities(self) -> dict:
         if not self.gateway:
@@ -133,6 +134,13 @@ class DataProvider:
         self._chat_routes = {"multiplex": multiplex, "routes": routes}
         return self._chat_routes
 
+    def mark_working(self, agent: str, working: bool) -> None:
+        if working:
+            self._working.add(agent)
+        else:
+            self._working.discard(agent)
+        self._cache = {"at": 0.0, "data": None}   # force fresh state so live status shows at once
+
     def chat_route(self, agent: str | None) -> str | None:
         """The profile arg for the gateway client: the agent name when it is served under a
         prefix, otherwise None (bare /v1/ — the default profile)."""
@@ -158,6 +166,12 @@ class DataProvider:
             data = self._local.build_state()
         else:
             data = self._remote_state()
+        # mark agents the portal knows are mid-run as working (live state for the Office etc.)
+        if self._working:
+            data["working_agents"] = sorted(set(data.get("working_agents", [])) | self._working)
+            for a in data.get("fleet", []):
+                if a.get("agent") in self._working:
+                    a["state"] = "EXECUTING"
         # board is always portal-owned
         tasks = self.board.list()
         data["board"] = [{
@@ -363,6 +377,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b"data: " + json.dumps(obj).encode("utf-8") + b"\n\n")
             self.wfile.flush()
 
+        working_agent = body.get("agent") or None
+        if working_agent:
+            self.provider.mark_working(working_agent, True)
         try:
             model_options = {"reasoning": {"enabled": True, "effort": "low"}} if want_reasoning else None
             run_id = gw.submit_run(user_input, profile=profile,
@@ -400,6 +417,9 @@ class Handler(BaseHTTPRequestHandler):
                 send({"error": str(e)})
             except Exception:
                 pass
+        finally:
+            if working_agent:
+                self.provider.mark_working(working_agent, False)
 
     # -- SSE --------------------------------------------------------------
 

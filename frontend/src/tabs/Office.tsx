@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { State } from "../types";
-import { buildSkyline, buildArmillary, type SceneController, type FleetAgent } from "../office/scene";
+import type { State, Agent } from "../types";
+import { buildArmillary, type SceneController, type FleetAgent } from "../office/scene";
+import { buildSkyline } from "../office/skyline";
 
 // Office — the fleet as a living city (Skyline) or a celestial mechanism (Armillary). Both are
 // generated from the live fleet: N agents, no hand-placed layout, stable visuals per agent.
@@ -9,11 +10,12 @@ type View = "skyline" | "armillary";
 
 export function Office({ state }: { state: State }) {
   const [view, setView] = useState<View>("skyline");
+  const [selected, setSelected] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctrlRef = useRef<SceneController | null>(null);
 
   const fleet: FleetAgent[] = state.fleet.map((a) => ({
-    agent: a.agent, initials: a.initials, name: a.name,
+    agent: a.agent, initials: a.initials, name: a.name, role: a.role,
     tasksToday: a.tasksToday, success: a.success, share: a.share, state: a.state,
   }));
   const fleetKey = fleet.map((a) => `${a.agent}:${a.tasksToday}:${a.state}`).join("|");
@@ -22,12 +24,13 @@ export function Office({ state }: { state: State }) {
     if (!canvasRef.current) return;
     ctrlRef.current?.dispose();
     const build = view === "skyline" ? buildSkyline : buildArmillary;
-    ctrlRef.current = build(canvasRef.current, fleet);
+    ctrlRef.current = build(canvasRef.current, fleet, { onSelect: (a) => setSelected(a) });
     return () => { ctrlRef.current?.dispose(); ctrlRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, fleetKey]);
 
   const lightsOn = state.fleet.filter((a) => a.state === "EXECUTING" || a.state === "TASK_IN_PROGRESS").length;
+  const dossier: Agent | undefined = selected ? state.fleet.find((a) => a.agent === selected) : undefined;
 
   return (
     <div className="office">
@@ -58,7 +61,22 @@ export function Office({ state }: { state: State }) {
 
       <section className="office-stage card">
         <canvas ref={canvasRef} className="office-canvas" />
-        <div className="office-hint mono">drag · scroll · zoom &nbsp;·&nbsp; generated from the live fleet</div>
+        <div className="office-hint mono">drag · scroll · zoom · click a building</div>
+        {dossier && (
+          <div className="office-dossier">
+            <button className="dossier-x" onClick={() => setSelected(null)} aria-label="Close">✕</button>
+            <span className="ini big">{dossier.initials}</span>
+            <div className="display dossier-name">{dossier.name}</div>
+            <div className="mono muted dossier-role">{dossier.role || dossier.agent}</div>
+            <dl className="dossier-fields">
+              <div><dt>Model</dt><dd className="mono">{dossier.defaultModel || "—"}</dd></div>
+              <div><dt>Runs today</dt><dd className="mono">{dossier.tasksToday}</dd></div>
+              <div><dt>Success</dt><dd className="mono">{dossier.success}%</dd></div>
+              <div><dt>Share</dt><dd className="mono">{dossier.share}%</dd></div>
+              <div><dt>State</dt><dd className="mono">{dossier.state}</dd></div>
+            </dl>
+          </div>
+        )}
       </section>
     </div>
   );
