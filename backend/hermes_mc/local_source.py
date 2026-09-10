@@ -75,7 +75,7 @@ class LocalSource:
     # -- fleet roster (from real profiles) ---------------------------------
 
     def profile_names(self) -> list[str]:
-        """Every agent profile that exists on disk, plus the root orchestrator if present."""
+        """Agent profiles that exist as directories under ~/.hermes/profiles."""
         names: list[str] = []
         proot = self.home / "profiles"
         if proot.is_dir():
@@ -84,9 +84,53 @@ class LocalSource:
                     names.append(child.name)
         return names
 
+    def _agent_dir(self, agent: str) -> Path:
+        """Where an agent's config/SOUL live: the root Hermes home for the orchestrator,
+        the profile directory otherwise."""
+        if agent == "orchestrator":
+            return self.home
+        return self.home / "profiles" / agent
+
+    def _has_identity(self, directory: Path) -> bool:
+        return (directory / "config.yaml").exists() or (directory / "SOUL.md").exists()
+
+    def fleet_agents(self) -> list[str]:
+        """The real fleet, derived from every source that shows an agent actually exists:
+        the root orchestrator, profile directories, and any agent that appears in the run log
+        (ephemeral agents included). Ordered orchestrator-first, then profiles, then log-only."""
+        ordered: list[str] = []
+        seen: set[str] = set()
+
+        def add(name: str) -> None:
+            if name and name not in seen:
+                ordered.append(name)
+                seen.add(name)
+
+        log_agents = self._log_agent_names()
+        # orchestrator = the root home, when it has an identity or logged any run
+        if self._has_identity(self.home) or "orchestrator" in log_agents:
+            add("orchestrator")
+        for p in self.profile_names():
+            add(p)
+        for a in log_agents:              # ephemeral / log-only agents with real activity
+            add(a)
+        return ordered
+
+    def _log_agent_names(self) -> list[str]:
+        """Distinct agent names in the run log, busiest first."""
+        if not self.agent_logs_db.exists():
+            return []
+        try:
+            with _ro_connect(self.agent_logs_db) as con:
+                return [str(r[0]).strip().lower() for r in con.execute(
+                    "SELECT agent_name FROM agent_logs GROUP BY agent_name "
+                    "ORDER BY COUNT(*) DESC") if r[0]]
+        except sqlite3.Error:
+            return []
+
     def _read_profile_model(self, agent: str) -> tuple[str, str]:
-        """(model, provider) from a profile's config.yaml. Empty strings when unset."""
-        cfg = self.home / "profiles" / agent / "config.yaml"
+        """(model, provider) from an agent's config.yaml. Empty strings when unset."""
+        cfg = self._agent_dir(agent) / "config.yaml"
         model = provider = ""
         try:
             text = cfg.read_text(encoding="utf-8")
@@ -114,7 +158,7 @@ class LocalSource:
 
     def _read_profile_role(self, agent: str) -> str:
         """A human role/description: config `description:`, else first SOUL.md heading."""
-        cfg = self.home / "profiles" / agent / "config.yaml"
+        cfg = self._agent_dir(agent) / "config.yaml"
         try:
             for line in cfg.read_text(encoding="utf-8").splitlines():
                 m = re.match(r"^\s*description\s*:\s*(.+?)\s*$", line)
@@ -122,7 +166,7 @@ class LocalSource:
                     return m.group(1).strip().strip("\"'")
         except OSError:
             pass
-        soul = self.home / "profiles" / agent / "SOUL.md"
+        soul = self._agent_dir(agent) / "SOUL.md"
         try:
             for line in soul.read_text(encoding="utf-8").splitlines():
                 s = line.lstrip("# ").strip()
@@ -220,7 +264,7 @@ class LocalSource:
         rows = self._log_rows(None)
         total = len(rows)
 
-        names = self.profile_names()
+        names = self.fleet_agents()
         # count runs / successes / models per agent from real logs
         counts = {a: 0 for a in names}
         completed = {a: 0 for a in names}

@@ -53,6 +53,7 @@ class Config:
     content_dir: Optional[Path]     # agent content library root; None in remote mode
     gateway_url: str                # base URL of the Hermes gateway API (…:8642)
     gateway_key: str = field(repr=False)   # bearer token; never printed
+    agent_logs_db: Optional[Path] = None   # run-history DB (Hermes agent hook writes it)
     bridge_url: str = ""            # remote mode: base URL of the Hermes-host bridge
     bridge_key: str = field(repr=False, default="")
     host: str = "0.0.0.0"           # portal bind address
@@ -99,6 +100,9 @@ def load(env: Optional[dict] = None) -> Config:
     if not gateway_key and mode == "local":
         gateway_key = _read_env_file(home / ".env").get("API_SERVER_KEY", "")
 
+    logs_db = getenv("HMC_AGENT_LOGS_DB")
+    agent_logs_db = Path(logs_db).expanduser() if logs_db else None
+
     if mode == "local":
         gateway_url = getenv("HMC_GATEWAY_URL") or "http://127.0.0.1:8642"
         return Config(
@@ -108,6 +112,7 @@ def load(env: Optional[dict] = None) -> Config:
             content_dir=Path(getenv("CONTENT_DIR") or str(project_dir / "content")).expanduser(),
             gateway_url=gateway_url.rstrip("/"),
             gateway_key=gateway_key,
+            agent_logs_db=agent_logs_db,
             host=getenv("HMC_HOST") or "0.0.0.0",
             port=int(getenv("HMC_PORT") or "51770"),
         )

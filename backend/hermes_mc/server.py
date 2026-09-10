@@ -39,7 +39,10 @@ class DataProvider:
         self.cfg = cfg
         self.board = Board(cfg.project_dir / "board.db")
         self.gateway = GatewayClient(cfg.gateway_url, cfg.gateway_key) if cfg.gateway_url else None
-        self._local = LocalSource(cfg.hermes_home, cfg.project_dir) if cfg.is_local else None
+        self._local = (
+            LocalSource(cfg.hermes_home, cfg.project_dir, cfg.agent_logs_db)
+            if cfg.is_local else None
+        )
         self._cache: dict = {"at": 0.0, "data": None}
 
     def capabilities(self) -> dict:
