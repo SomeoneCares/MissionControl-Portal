@@ -61,6 +61,8 @@ export const api = {
   removeFleet: (id: string) => postJSON<{ removed: boolean }>("/api/fleets/remove", { id }),
   schedule: () => getJSON<{ jobs: CronJob[] }>("/api/schedule"),
   content: () => getJSON<{ docs: ContentDoc[] }>("/api/content"),
+  contentDir: () => getJSON<ContentDirInfo>("/api/content/dir"),
+  setContentDir: (p: string) => postJSON<ContentDirInfo>("/api/content/dir", { path: p }),
   contentRead: (p: string) =>
     getJSON<{ path: string; exists: boolean; content: string }>(
       `/api/content/read?path=${encodeURIComponent(p)}`),
@@ -125,6 +127,17 @@ export interface CronJob {
   deliver: string | null;
   model: string;
   prompt: string;
+}
+
+export interface ContentDirInfo {
+  path: string | null;
+  exists?: boolean;
+  writable?: boolean;
+  docs?: number;
+  default?: string;
+  editable: boolean;
+  env_locked?: boolean;
+  reason?: string;
 }
 
 export interface ContentDoc {

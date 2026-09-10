@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { HealthInfo } from "../types";
-import { api, setFleet, getFleet, type FleetInfo } from "../api/client";
+import { api, setFleet, getFleet, type FleetInfo, type ContentDirInfo } from "../api/client";
 import { settings, applySettings, ACCENT_PRESETS } from "../store/settings";
 
 // Settings — branding (name, accent, theme), connected fleets, and connection info. Branding is
@@ -89,6 +89,9 @@ export function Settings({ health }: { health: HealthInfo | null }) {
         </ul>
       </section>
 
+      {/* content library folder */}
+      <ContentDirBlock />
+
       {/* connection */}
       <section className="card settings-block">
         <span className="eyebrow block-title">Connection</span>
@@ -100,6 +103,72 @@ export function Settings({ health }: { health: HealthInfo | null }) {
         <button className="content-tool" onClick={() => { settings.set({ portalName: "", accent: "", theme: "system" }); applySettings(); }}>Reset branding</button>
       </section>
     </div>
+  );
+}
+
+function ContentDirBlock() {
+  const [info, setInfo] = useState<ContentDirInfo | null>(null);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const load = () => api.contentDir().then((d) => { setInfo(d); setDraft(d.path ?? ""); }).catch(() => setInfo(null));
+  useEffect(() => { load(); }, []);
+
+  const save = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const d = await api.setContentDir(draft.trim());
+      setInfo(d); setDraft(d.path ?? "");
+      setMsg(`Saved — content is now stored in ${d.path}${d.docs ? ` (${d.docs} document${d.docs === 1 ? "" : "s"})` : ""}.`);
+    } catch (e) {
+      setMsg(String(e).replace(/^Error:\s*/, ""));
+    }
+    setBusy(false);
+  };
+
+  const dirty = info?.path != null && draft.trim() !== info.path;
+
+  return (
+    <section className="card settings-block">
+      <span className="eyebrow block-title">Content library</span>
+      <p className="mono muted block-note">
+        Where the portal writes agent documents. New docs, edits, and Word exports all live here.
+      </p>
+      {!info && <p className="mono muted">loading…</p>}
+      {info && !info.editable && (
+        <p className="mono muted">{info.reason || "The content folder is managed on the Hermes host and can't be changed here."}</p>
+      )}
+      {info && info.editable && (
+        <>
+          <div className="set-field">
+            <label>Folder path</label>
+            <input className="add-input mono" value={draft} spellCheck={false}
+                   placeholder="/home/you/.hermes-mc/content"
+                   onChange={(e) => setDraft(e.target.value)}
+                   disabled={info.env_locked} />
+          </div>
+          <div className="dir-status mono">
+            <span className={`status-dot ${info.exists ? "up" : "down"}`} />
+            {info.exists
+              ? <>folder exists{info.writable ? "" : " · not writable"}{typeof info.docs === "number" ? ` · ${info.docs} document${info.docs === 1 ? "" : "s"}` : ""}</>
+              : <>folder will be created on save</>}
+          </div>
+          {info.env_locked && (
+            <p className="mono muted block-note">Locked by the <code>CONTENT_DIR</code> environment variable — unset it on the host to change the folder here.</p>
+          )}
+          {msg && <p className="pane-msg mono">{msg}</p>}
+          <div className="dir-actions">
+            <button className="btn-primary" onClick={save} disabled={busy || info.env_locked || (!dirty && info.exists)}>
+              {busy ? "Saving…" : dirty ? "Save folder" : "Saved"}
+            </button>
+            {info.default && draft.trim() !== info.default && !info.env_locked && (
+              <button className="content-tool" onClick={() => setDraft(info.default!)}>Use default</button>
+            )}
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 

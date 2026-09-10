@@ -18,6 +18,7 @@ handlers never care which mode they run in.
 from __future__ import annotations
 
 import json
+import os
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -84,6 +85,50 @@ class DataProvider:
             return self._local.content_read(self.cfg.content_dir, rel_path)
         data = self._bridge_get(f"/content/read?path={quote(rel_path)}")
         return data if isinstance(data, dict) else {"path": rel_path, "exists": False, "content": ""}
+
+    def content_dir_info(self) -> dict:
+        """Describe the content library folder for the Settings panel."""
+        default = str((self.cfg.project_dir / "content").expanduser())
+        p = self.cfg.content_dir
+        editable = bool(self.cfg.is_local)
+        if not p:
+            return {"path": None, "editable": False, "default": default,
+                    "reason": "Content lives on the Hermes host in remote mode."}
+        p = Path(p)
+        exists = p.is_dir()
+        try:
+            docs = sum(1 for _ in p.rglob("*.md")) if exists else 0
+        except OSError:
+            docs = 0
+        return {
+            "path": str(p), "exists": exists,
+            "writable": exists and os.access(p, os.W_OK),
+            "docs": docs, "default": default, "editable": editable,
+            "env_locked": bool(os.environ.get("CONTENT_DIR", "").strip()),
+        }
+
+    def set_content_dir(self, raw: str) -> dict:
+        """Point the content library at a new folder, creating it if needed, and persist it."""
+        if not self.cfg.is_local:
+            raise ContentError("the content folder is set on the Hermes host in remote mode")
+        if os.environ.get("CONTENT_DIR", "").strip():
+            raise ContentError("CONTENT_DIR is set in the environment; unset it to change the folder here")
+        raw = (raw or "").strip()
+        if not raw:
+            raise ContentError("provide a folder path")
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            raise ContentError("use an absolute path")
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise ContentError(f"cannot create that folder: {e}")
+        if not os.access(path, os.W_OK):
+            raise ContentError("that folder is not writable by the portal")
+        config_mod.write_portal_settings(self.cfg.project_dir, {"content_dir": str(path)})
+        self.cfg.content_dir = path
+        self.content_store = ContentStore(path)
+        return self.content_dir_info()
 
     def _bridge_get(self, path: str):
         import urllib.request
@@ -275,6 +320,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"jobs": self.provider.cron_jobs()})
         if path == "/api/content":
             return self._json({"docs": self.provider.content_docs()})
+        if path == "/api/content/dir":
+            return self._json(self.provider.content_dir_info())
         if path == "/api/content/read":
             rel = parse_qs(urlparse(self.path).query).get("path", [""])[0]
             try:
@@ -371,6 +418,11 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/agents/toolset":
                 return self._admin_write(lambda: self.provider.admin.set_toolset(
                     body.get("agent", ""), body.get("toolset", ""), bool(body.get("enabled"))))
+            if path == "/api/content/dir":
+                try:
+                    return self._json(self.provider.set_content_dir(body.get("path", "")))
+                except ContentError as e:
+                    return self._json({"error": str(e)}, status=400)
             if path in ("/api/content/save", "/api/content/create", "/api/content/delete"):
                 cs = self.provider.content_store
                 if not cs:

@@ -457,6 +457,9 @@
 .block-note { font-size: 11px; line-height: 1.6; margin: 0; }
 .set-field { display: flex; flex-direction: column; gap: 6px; }
 .set-field label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.dir-status { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+.dir-status code, .block-note code { font-size: 11px; padding: 1px 5px; border-radius: 5px; background: var(--panel-2); }
+.dir-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .set-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 640px) { .set-grid { grid-template-columns: 1fr; } }
 .accent-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

@@ -14,6 +14,7 @@ gateway key, all from the environment and disk. Secrets are read but never logge
 """
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +23,27 @@ from typing import Optional
 
 def _env(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
+
+
+def portal_settings_file(project_dir: Path) -> Path:
+    """Where the portal persists user-set overrides (content dir, …)."""
+    return Path(project_dir) / "portal-settings.json"
+
+
+def read_portal_settings(project_dir: Path) -> dict:
+    try:
+        data = json.loads(portal_settings_file(project_dir).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_portal_settings(project_dir: Path, patch: dict) -> dict:
+    current = read_portal_settings(project_dir)
+    current.update({k: v for k, v in patch.items() if v is not None})
+    portal_settings_file(project_dir).write_text(
+        json.dumps(current, indent=2), encoding="utf-8")
+    return current
 
 
 def _read_env_file(path: Path) -> dict[str, str]:
@@ -103,13 +125,19 @@ def load(env: Optional[dict] = None) -> Config:
     logs_db = getenv("HMC_AGENT_LOGS_DB")
     agent_logs_db = Path(logs_db).expanduser() if logs_db else None
 
+    # Content library root: explicit env wins; else a folder the user set in Settings
+    # (persisted in the project dir); else the default under the project dir.
+    persisted = read_portal_settings(project_dir)
+    content_override = getenv("CONTENT_DIR") or str(persisted.get("content_dir") or "")
+    content_dir = Path(content_override or str(project_dir / "content")).expanduser()
+
     if mode == "local":
         gateway_url = getenv("HMC_GATEWAY_URL") or "http://127.0.0.1:8642"
         return Config(
             mode="local",
             hermes_home=home,
             project_dir=project_dir,
-            content_dir=Path(getenv("CONTENT_DIR") or str(project_dir / "content")).expanduser(),
+            content_dir=content_dir,
             gateway_url=gateway_url.rstrip("/"),
             gateway_key=gateway_key,
             agent_logs_db=agent_logs_db,
