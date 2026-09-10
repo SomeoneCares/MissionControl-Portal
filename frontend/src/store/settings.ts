@@ -54,10 +54,12 @@ export function applySettings() {
     root.style.setProperty("--ember", current.accent);
     root.style.setProperty("--ember-soft", lighten(current.accent, 0.28));
     root.style.setProperty("--ember-bg", rgba(current.accent, 0.11));
+    root.style.setProperty("--ember-glow", rgba(current.accent, 0.2));
   } else {
     root.style.removeProperty("--ember");
     root.style.removeProperty("--ember-soft");
     root.style.removeProperty("--ember-bg");
+    root.style.removeProperty("--ember-glow");
   }
 }
 

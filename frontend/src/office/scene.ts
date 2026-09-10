@@ -1,9 +1,26 @@
 // Shared office types + helpers, and the Armillary view. The Skyline lives in skyline.ts.
-// Both views use the original skyline palette: ink ground/sky, ember structure, and the cyan
-// spotlight for live-working agents.
+// Both views share one palette, driven by the portal accent: cool near-black ground/sky,
+// silver structure, a blue idle glow and a green "processing now" pulse — matching the
+// original deployed skyline ("green pulse = processing, blue glow = assigned, dim = idle").
 
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { settings } from "../store/settings";
+
+// The city colour follows the portal's accent (Settings). With no accent chosen it falls back
+// to the original skyline's royal blue, so the fleet reads blue out of the box.
+export function officeAccentHex(): string {
+  const a = settings.get().accent;
+  return a && /^#?[0-9a-f]{6}$/i.test(a) ? (a[0] === "#" ? a : "#" + a) : "#3b6bff";
+}
+export function officeAccent(): number {
+  return parseInt(officeAccentHex().slice(1), 16);
+}
+export function mixWhiteHex(hex: string, amt: number): string {
+  const c = new THREE.Color(hex);
+  c.lerp(new THREE.Color("#ffffff"), amt);
+  return "#" + c.getHexString();
+}
 
 export interface FleetAgent {
   agent: string;
@@ -24,12 +41,10 @@ export interface SceneController {
   dispose: () => void;
 }
 
-// original skyline palette
-const EMBER = 0xe25822;
-const EMBER_SOFT = 0xf59e6b;
-const SPOTLIGHT = 0x00e5ff;
-const BG = 0x120c08;
-const RING = 0x5a3a22; // warm ember-bronze to match the skyline, replacing the old brass
+// shared office palette (accent-driven, cool)
+const SPOTLIGHT = 0x37e08a; // processing-now pulse (green), like the original
+const BG = 0x0a0b10;        // cool near-black sky
+const RING = 0x8b95a3;      // silver armature, matching the grey monuments
 
 function isOrch(a: FleetAgent): boolean {
   return a.agent === "orchestrator" || /orchestrat/i.test(a.agent);
@@ -43,9 +58,9 @@ function glowTexture(): THREE.Texture {
   c.width = c.height = 128;
   const x = c.getContext("2d")!;
   const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
-  g.addColorStop(0, "rgba(255,190,140,1)");
-  g.addColorStop(0.4, "rgba(226,88,34,0.5)");
-  g.addColorStop(1, "rgba(226,88,34,0)");
+  g.addColorStop(0, "rgba(255,255,255,1)");
+  g.addColorStop(0.4, "rgba(255,255,255,0.45)");
+  g.addColorStop(1, "rgba(255,255,255,0)");
   x.fillStyle = g;
   x.fillRect(0, 0, 128, 128);
   return new THREE.CanvasTexture(c);
@@ -120,18 +135,20 @@ function baseScene(canvas: HTMLCanvasElement) {
 
 export function buildArmillary(canvas: HTMLCanvasElement, fleet: FleetAgent[], opts: SceneOpts = {}): SceneController {
   const { renderer, scene, camera, controls, resize } = baseScene(canvas);
+  const EMBER = officeAccent();
+  const EMBER_SOFT = parseInt(mixWhiteHex(officeAccentHex(), 0.34).slice(1), 16);
   const glow = glowTexture();
   const motes = makeMotes(scene, glow);
   camera.position.set(0, 3, 14);
   controls.target.set(0, 0, 0);
   controls.autoRotateSpeed = 0.8;
 
-  scene.add(new THREE.AmbientLight(0x3a2a1c, 0.7));
-  const core = new THREE.PointLight(0xffa265, 4.5, 50); scene.add(core);
-  const d1 = new THREE.DirectionalLight(EMBER_SOFT, 0.6); d1.position.set(-10, 12, 8); scene.add(d1);
+  scene.add(new THREE.AmbientLight(0x2a2f3a, 0.8));
+  const core = new THREE.PointLight(EMBER, 4.5, 50); scene.add(core);
+  const d1 = new THREE.DirectionalLight(0xdfe6ef, 0.6); d1.position.set(-10, 12, 8); scene.add(d1);
 
   const sun = new THREE.Mesh(new THREE.SphereGeometry(0.62, 32, 32),
-    new THREE.MeshBasicMaterial({ color: 0xffc79a, toneMapped: false }));
+    new THREE.MeshBasicMaterial({ color: mixWhiteHex(officeAccentHex(), 0.5), toneMapped: false }));
   scene.add(sun);
   const sunGlow = glowSprite(glow, 5.6, EMBER, 0.9); scene.add(sunGlow);
   const orch = fleet.find(isOrch);
@@ -160,13 +177,13 @@ export function buildArmillary(canvas: HTMLCanvasElement, fleet: FleetAgent[], o
     const rad = 0.13 + Math.sqrt(Math.max(0, a.share)) * 0.1;
     const working = isWorking(a);
     const active = working || a.tasksToday > 0;
-    const bodyColor = working ? SPOTLIGHT : active ? EMBER_SOFT : 0x5a4838;
+    const bodyColor = working ? SPOTLIGHT : active ? EMBER_SOFT : 0x59616e;
     const body = new THREE.Mesh(new THREE.SphereGeometry(rad, 24, 24), new THREE.MeshStandardMaterial({
-      color: bodyColor, emissive: working ? 0x0a4a55 : active ? 0x7a3818 : 0x000000, roughness: 0.55, metalness: 0.25,
+      color: bodyColor, emissive: working ? 0x0d5a34 : active ? EMBER : 0x000000, emissiveIntensity: active ? 0.5 : 0, roughness: 0.55, metalness: 0.25,
     }));
     body.userData.agent = a.agent;
     pivot.add(body);
-    const bglow = glowSprite(glow, rad * 5, working ? SPOTLIGHT : active ? EMBER_SOFT : 0x6b5847, active ? 0.55 : 0.18);
+    const bglow = glowSprite(glow, rad * 5, working ? SPOTLIGHT : active ? EMBER_SOFT : 0x7a828e, active ? 0.55 : 0.18);
     pivot.add(bglow);
     const label = labelSprite(a.initials, 0.34); pivot.add(label);
     bodies.push({ pivot, body, bglow, label, agent: a, R, spd: 0.1 + (a.tasksToday / maxTasks) * 0.42, ph: i * 1.1, working });

@@ -5,12 +5,16 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { FleetAgent, SceneController, SceneOpts } from "./scene";
+import { officeAccentHex, mixWhiteHex } from "./scene";
 
-const EMBER = "#e25822";
-const EMBER_SOFT = "#f59e6b";
-const INK = "#1a1410";
-const INK_2 = "#241a13";
-const SPOTLIGHT = "#00e5ff";
+// City colour follows the portal accent (Settings); with none chosen it falls back to the
+// original skyline's royal blue. Idle/assigned windows glow this accent; "processing now"
+// agents pulse SPOTLIGHT green — exactly the original's "green pulse / blue glow / dim" code.
+const EMBER = officeAccentHex();
+const EMBER_SOFT = mixWhiteHex(EMBER, 0.3);
+const INK = "#12141b";        // cool near-black tower body
+const INK_2 = "#181b24";
+const SPOTLIGHT = "#37e08a";  // processing-now pulse (green)
 
 type Sil = "stepped" | "twin" | "slab" | "tower";
 type Mon = "conductor" | "scout" | "scribe" | "herald" | "smith";
@@ -87,8 +91,8 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[], opt
   renderer.toneMappingExposure = 1.15;
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color("#120c08");
-  scene.fog = new THREE.Fog("#120c08", 26, 70);
+  scene.background = new THREE.Color("#0a0b10");
+  scene.fog = new THREE.Fog("#0a0b10", 26, 70);
 
   const camera = new THREE.PerspectiveCamera(38, wrap.clientWidth / wrap.clientHeight, 0.1, 300);
   camera.position.set(18, 13, 18);
@@ -99,12 +103,12 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[], opt
   controls.minPolarAngle = Math.PI / 6; controls.maxPolarAngle = Math.PI / 2.25;
   controls.autoRotate = true; controls.autoRotateSpeed = 0.45;
 
-  scene.add(new THREE.AmbientLight("#f3c79a", 0.35));
-  const d1 = new THREE.DirectionalLight("#f59e6b", 0.9); d1.position.set(-12, 14, 6); scene.add(d1);
-  const d2 = new THREE.DirectionalLight("#8a5a3a", 0.35); d2.position.set(10, 8, -10); scene.add(d2);
+  scene.add(new THREE.AmbientLight("#c9d3e0", 0.4));
+  const d1 = new THREE.DirectionalLight("#dfe6ef", 0.95); d1.position.set(-12, 14, 6); scene.add(d1);
+  const d2 = new THREE.DirectionalLight("#6b7688", 0.35); d2.position.set(10, 8, -10); scene.add(d2);
 
   const sky = new THREE.Mesh(new THREE.SphereGeometry(120, 32, 32),
-    new THREE.MeshBasicMaterial({ side: THREE.BackSide, color: "#1a1410" }));
+    new THREE.MeshBasicMaterial({ side: THREE.BackSide, color: "#0c0e15" }));
   scene.add(sky);
   const horizon = new THREE.Mesh(
     new THREE.SphereGeometry(105, 32, 16, 0, Math.PI * 2, Math.PI * 0.4, Math.PI * 0.18),
@@ -115,7 +119,7 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[], opt
     new THREE.MeshStandardMaterial({ color: INK_2, roughness: 0.95 }));
   ground.rotation.x = -Math.PI / 2; scene.add(ground);
   const disc = new THREE.Mesh(new THREE.CircleGeometry(6, 64),
-    new THREE.MeshStandardMaterial({ color: "#2a1f17", roughness: 0.8 }));
+    new THREE.MeshStandardMaterial({ color: "#161a22", roughness: 0.8 }));
   disc.rotation.x = -Math.PI / 2; disc.position.y = 0.005; scene.add(disc);
   const ring = new THREE.Mesh(new THREE.RingGeometry(5.6, 5.85, 96),
     new THREE.MeshBasicMaterial({ color: EMBER, toneMapped: false, transparent: true, opacity: 0.55 }));
@@ -133,7 +137,7 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[], opt
     const dx = a.position[0], dz = a.position[2];
     const len = Math.hypot(dx, dz);
     const angle = Math.atan2(dx, dz);
-    const street = new THREE.Mesh(new THREE.PlaneGeometry(1.2, len), new THREE.MeshStandardMaterial({ color: "#1f1611", roughness: 0.9 }));
+    const street = new THREE.Mesh(new THREE.PlaneGeometry(1.2, len), new THREE.MeshStandardMaterial({ color: "#151922", roughness: 0.9 }));
     street.rotation.x = -Math.PI / 2; street.rotation.z = -angle; street.position.set(dx / 2, 0.008, dz / 2);
     scene.add(street);
     [0.35, 0.7].forEach((tp) => {
@@ -160,8 +164,8 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[], opt
     const m = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 16), new THREE.MeshBasicMaterial({ color, transparent: true, opacity }));
     m.position.set(...pos); m.userData = { baseY: pos[1], floatIntensity, speed }; scene.add(m); clouds.push(m);
   }
-  addCloud([-10, 10, -8], 2.2, "#2a1d14", 0.6, 1.2, 0.6);
-  addCloud([11, 12, -6], 3.0, "#1f160f", 0.55, 1.4, 0.5);
+  addCloud([-10, 10, -8], 2.2, "#161a24", 0.6, 1.2, 0.6);
+  addCloud([11, 12, -6], 3.0, "#11141c", 0.55, 1.4, 0.5);
 
   function buildShell(a: Spec): THREE.Group {
     const [w, h, d] = a.size;
@@ -227,18 +231,18 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[], opt
     const on = (seed * 31) % 1 > 0.82 ? 1 : 0; return on * 0.35; // IDLE
   }
 
-  function stone() { return new THREE.MeshStandardMaterial({ color: "#e8d8b4", roughness: 0.7, metalness: 0.05 }); }
-  function stoneDark() { return new THREE.MeshStandardMaterial({ color: "#a8946f", roughness: 0.8 }); }
+  function stone() { return new THREE.MeshStandardMaterial({ color: "#cdd4dc", roughness: 0.6, metalness: 0.15 }); }
+  function stoneDark() { return new THREE.MeshStandardMaterial({ color: "#969fa9", roughness: 0.75 }); }
   function buildMonument(a: Spec): THREE.Group {
     const g = new THREE.Group();
     const acc = new THREE.Color(a.accent);
     const sm = stone(), sd = stoneDark();
     const glow = (i = 3.2) => new THREE.MeshStandardMaterial({ color: "#000", emissive: acc.clone(), emissiveIntensity: i, toneMapped: false });
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.95, 0.24, 24), new THREE.MeshStandardMaterial({ color: "#3a2b20", roughness: 0.85 }));
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.95, 0.24, 24), new THREE.MeshStandardMaterial({ color: "#262b34", roughness: 0.85 }));
     base.position.y = 0.12; g.add(base);
     const trim = new THREE.Mesh(new THREE.TorusGeometry(0.82, 0.025, 12, 48), new THREE.MeshStandardMaterial({ color: "#000", emissive: acc.clone(), emissiveIntensity: 2.6, toneMapped: false }));
     trim.position.y = 0.26; trim.rotation.x = Math.PI / 2; g.add(trim);
-    const slab = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.78, 0.08, 24), new THREE.MeshStandardMaterial({ color: "#5a4232", roughness: 0.8 }));
+    const slab = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 0.78, 0.08, 24), new THREE.MeshStandardMaterial({ color: "#39404b", roughness: 0.8 }));
     slab.position.y = 0.32; g.add(slab);
     const pl = new THREE.PointLight(a.accent, 2.4, 4.5); pl.position.y = 0.55; g.add(pl);
     const fig = new THREE.Group();

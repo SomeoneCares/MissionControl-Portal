@@ -312,6 +312,8 @@ class Handler(BaseHTTPRequestHandler):
             qs = parse_qs(urlparse(self.path).query)
             name = (qs.get("name") or [""])[0]
             return self._admin_read(lambda a: self.provider.admin.read_file(a, name))
+        if path == "/api/agents/skills":
+            return self._admin_read(lambda a: self.provider.admin.list_skills(a))
         if path == "/api/state":
             return self._json(self.provider.state())
         if path == "/api/board":
@@ -366,6 +368,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/agents/create":
                 return self._admin_write(lambda: self.provider.admin.create_agent(
                     body.get("name", ""), body.get("role", ""), body.get("model", ""), body.get("provider", "")))
+            if path == "/api/agents/toolset":
+                return self._admin_write(lambda: self.provider.admin.set_toolset(
+                    body.get("agent", ""), body.get("toolset", ""), bool(body.get("enabled"))))
             if path in ("/api/content/save", "/api/content/create", "/api/content/delete"):
                 cs = self.provider.content_store
                 if not cs:

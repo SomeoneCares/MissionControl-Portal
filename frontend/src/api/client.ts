@@ -73,6 +73,11 @@ export const api = {
   contentWordUrl: (p: string) => withFleet(`/api/content/word?path=${encodeURIComponent(p)}`),
   createAgent: (spec: { name: string; role?: string; model?: string; provider?: string }) =>
     postJSON<{ ok: boolean; agent: string; name: string }>("/api/agents/create", spec),
+  agentSkills: (agent: string) =>
+    getJSON<{ installed: { name: string; description: string }[]; disabled_toolsets: string[] }>(
+      `/api/agents/skills?agent=${encodeURIComponent(agent)}`),
+  setToolset: (agent: string, toolset: string, enabled: boolean) =>
+    postJSON<{ ok: boolean }>("/api/agents/toolset", { agent, toolset, enabled }),
   board: {
     list: () => getJSON<{ tasks: BoardTask[] }>("/api/board"),
     create: (t: { title: string; priority?: string; status?: string }) =>

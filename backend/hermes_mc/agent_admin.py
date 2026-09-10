@@ -218,6 +218,68 @@ class AgentAdmin:
             raise AdminError(f"profile created but setup failed (rolled back): {e}")
         return {"ok": True, "agent": agent, "name": name}
 
+    # -- per-agent skills & toolsets --------------------------------------
+
+    def list_skills(self, agent: str) -> dict:
+        """The agent's installed skills (from its skills/ dir) and which toolsets it has disabled."""
+        d = self._agent_dir(agent)
+        installed = []
+        skills_root = d / "skills"
+        if skills_root.is_dir():
+            for sk in sorted(skills_root.rglob("SKILL.md"))[:200]:
+                name, desc = sk.parent.name, ""
+                try:
+                    for line in sk.read_text(encoding="utf-8", errors="replace").splitlines()[:15]:
+                        m = re.match(r"^name\s*:\s*(.+)$", line)
+                        if m:
+                            name = m.group(1).strip().strip("\"'")
+                        m = re.match(r"^description\s*:\s*(.+)$", line)
+                        if m:
+                            desc = m.group(1).strip().strip("\"'")[:140]
+                        if line.startswith("# ") and not desc:
+                            desc = line[2:].strip()[:140]
+                except OSError:
+                    pass
+                installed.append({"name": name, "description": desc})
+        return {"installed": installed, "disabled_toolsets": self._disabled_toolsets(d)}
+
+    def _disabled_toolsets(self, agent_dir: Path) -> list[str]:
+        cfg = agent_dir / "config.yaml"
+        try:
+            lines = cfg.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return []
+        out, in_block = [], False
+        for line in lines:
+            if re.match(r"^disabled_toolsets\s*:", line):
+                in_block = True
+                continue
+            if in_block:
+                m = re.match(r"^\s*-\s*(.+?)\s*$", line)
+                if m:
+                    out.append(m.group(1).strip().strip("\"'"))
+                elif line.strip() and not line.startswith((" ", "\t")):
+                    break
+        return out
+
+    def set_toolset(self, agent: str, toolset: str, enabled: bool) -> dict:
+        """Enable/disable a toolset for an agent by editing config.yaml's disabled_toolsets list."""
+        toolset = (toolset or "").strip()
+        if not toolset:
+            raise AdminError("toolset required")
+        cfg = self._agent_dir(agent) / "config.yaml"
+        text = cfg.read_text(encoding="utf-8") if cfg.exists() else ""
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        if cfg.exists():
+            (cfg.with_name(f"config.yaml.bak-toolset-{stamp}")).write_text(text, encoding="utf-8")
+        disabled = set(self._disabled_toolsets(cfg.parent))
+        if enabled:
+            disabled.discard(toolset)
+        else:
+            disabled.add(toolset)
+        cfg.write_text(_rewrite_disabled_toolsets(text, sorted(disabled)), encoding="utf-8")
+        return {"ok": True, "agent": agent, "toolset": toolset, "enabled": enabled}
+
     # -- model assignment (edits config.yaml, backed up) -------------------
 
     def set_model(self, agent: str, model: str, provider: str = "") -> dict:
@@ -245,6 +307,35 @@ class AgentAdmin:
 
 def _redact(text: str) -> str:
     return _SECRET_RE.sub("[REDACTED]", text)
+
+
+def _rewrite_disabled_toolsets(text: str, disabled: list[str]) -> str:
+    """Replace (or append) the top-level ``disabled_toolsets:`` list with ``disabled``."""
+    lines = text.splitlines()
+    out: list[str] = []
+    i, replaced = 0, False
+    while i < len(lines):
+        line = lines[i]
+        if re.match(r"^disabled_toolsets\s*:", line):
+            replaced = True
+            if disabled:
+                out.append("disabled_toolsets:")
+                out.extend(f"- {t}" for t in disabled)
+            i += 1
+            while i < len(lines):  # skip the old list items
+                if re.match(r"^\s*-\s*", lines[i]) or (lines[i].strip() == ""):
+                    i += 1
+                    if lines[i - 1].strip() == "" and i < len(lines) and not re.match(r"^\s*-", lines[i]):
+                        break
+                else:
+                    break
+            continue
+        out.append(line)
+        i += 1
+    if not replaced and disabled:
+        out.append("disabled_toolsets:")
+        out.extend(f"- {t}" for t in disabled)
+    return "\n".join(out).rstrip() + "\n"
 
 
 def _rewrite_model(text: str, model: str, provider: str) -> str:

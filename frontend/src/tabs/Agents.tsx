@@ -85,7 +85,7 @@ export function Agents({ state }: { state: State }) {
   );
 }
 
-type DrawerTab = "profile" | "model" | "files";
+type DrawerTab = "profile" | "model" | "skills" | "files";
 
 function CreateAgentModal({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
@@ -169,7 +169,7 @@ function AgentDrawer({ agent, onClose }: { agent: Agent; onClose: () => void }) 
         </div>
 
         <div className="drawer-tabs">
-          {(["profile", "model", "files"] as DrawerTab[]).map((t) => (
+          {(["profile", "model", "skills", "files"] as DrawerTab[]).map((t) => (
             <button key={t} className={`drawer-tab ${t === tab ? "active" : ""}`} onClick={() => setTab(t)}>
               {t}
             </button>
@@ -178,6 +178,7 @@ function AgentDrawer({ agent, onClose }: { agent: Agent; onClose: () => void }) 
 
         {tab === "profile" && <ProfilePane agent={agent} />}
         {tab === "model" && <ModelPane agent={agent} />}
+        {tab === "skills" && <SkillsPane agent={agent} />}
         {tab === "files" && <FilesPane agent={agent} />}
       </aside>
     </div>
@@ -272,6 +273,65 @@ function ModelPane({ agent }: { agent: Agent }) {
           </button>
           <p className="mono muted pane-count">{models.length} models enabled on this host</p>
         </>
+      )}
+      {msg && <p className="pane-msg mono">{msg}</p>}
+    </div>
+  );
+}
+
+function SkillsPane({ agent }: { agent: Agent }) {
+  const [installed, setInstalled] = useState<{ name: string; description: string }[] | null>(null);
+  const [disabled, setDisabled] = useState<string[]>([]);
+  const [toolsets, setToolsets] = useState<string[]>([]);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const load = () => api.agentSkills(agent.agent).then((d) => { setInstalled(d.installed); setDisabled(d.disabled_toolsets); }).catch(() => setInstalled([]));
+  useEffect(() => {
+    load();
+    fetch("/api/toolsets").then((r) => r.ok ? r.json() : { data: [] }).then((d) => setToolsets((d.data ?? []).map((t: any) => t.name))).catch(() => setToolsets([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent.agent]);
+
+  const toggle = async (t: string, enabled: boolean) => {
+    setDisabled((d) => enabled ? d.filter((x) => x !== t) : [...d, t]); // optimistic
+    try { await api.setToolset(agent.agent, t, enabled); setMsg(`${t} ${enabled ? "enabled" : "disabled"} — takes effect next turn.`); }
+    catch (e) { setMsg(String(e)); load(); }
+  };
+
+  return (
+    <div className="pane">
+      <span className="eyebrow">Toolsets</span>
+      {toolsets.length === 0 ? (
+        <p className="mono muted pane-loading">no toolsets reported by the gateway</p>
+      ) : (
+        <ul className="toolset-list">
+          {toolsets.map((t) => {
+            const on = !disabled.includes(t);
+            return (
+              <li key={t} className="toolset-item">
+                <span className="mono toolset-name">{t}</span>
+                <button className={`toggle ${on ? "on" : "off"}`} onClick={() => toggle(t, !on)} aria-label={on ? "disable" : "enable"}>
+                  <span className="toggle-knob" />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <span className="eyebrow skills-installed-title">Installed skills</span>
+      {installed === null ? (
+        <p className="mono muted pane-loading">loading…</p>
+      ) : installed.length === 0 ? (
+        <p className="empty-block mono">No skills installed for this agent.</p>
+      ) : (
+        <ul className="skill-list">
+          {installed.map((sk, i) => (
+            <li key={i}>
+              <span className="skill-name">{sk.name}</span>
+              {sk.description && <span className="mono muted skill-desc">{sk.description}</span>}
+            </li>
+          ))}
+        </ul>
       )}
       {msg && <p className="pane-msg mono">{msg}</p>}
     </div>

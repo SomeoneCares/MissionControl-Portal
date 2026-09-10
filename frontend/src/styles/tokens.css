@@ -15,6 +15,7 @@
   --ember: oklch(0.66 0.22 38);
   --ember-soft: oklch(0.78 0.16 50);
   --ember-bg: oklch(0.66 0.22 38 / 0.1);
+  --ember-glow: oklch(0.66 0.22 38 / 0.2);   /* the top-right corner wash; accent-driven */
   --spot: oklch(0.62 0.16 200);
   --ok: oklch(0.55 0.12 150);
   --ok-bg: oklch(0.55 0.12 150 / 0.12);
@@ -44,6 +45,7 @@
     --ember: #f0895a;
     --ember-soft: #f2a97e;
     --ember-bg: #33200f;
+    --ember-glow: #f0895a33;
     --spot: #3fc3d6;
     --ok: #8fbf98;
     --ok-bg: #1b2a1d;
@@ -66,6 +68,7 @@
   --ember: #f0895a;
   --ember-soft: #f2a97e;
   --ember-bg: #33200f;
+  --ember-glow: #f0895a33;
   --spot: #3fc3d6;
   --ok: #8fbf98;
   --ok-bg: #1b2a1d;
@@ -86,9 +89,9 @@ body {
   line-height: 1.5;
   font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;
-  /* the original's warm ground: an ember glow top-right, an ink wash bottom-left */
+  /* the original's ground: an accent glow top-right, an ink wash bottom-left */
   background-image:
-    radial-gradient(900px 600px at 100% 0%, oklch(0.66 0.22 38 / 0.20), transparent 60%),
+    radial-gradient(900px 600px at 100% 0%, var(--ember-glow), transparent 60%),
     radial-gradient(700px 500px at 0% 100%, oklch(0.16 0.012 50 / 0.08), transparent 60%),
     linear-gradient(180deg, oklch(0.97 0.012 75) 0%, oklch(0.94 0.014 70) 100%);
   background-attachment: fixed;

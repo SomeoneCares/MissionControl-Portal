@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { State, Agent } from "../types";
 import { buildArmillary, type SceneController, type FleetAgent } from "../office/scene";
 import { buildSkyline } from "../office/skyline";
+import { settings } from "../store/settings";
 
 // Office — the fleet as a living city (Skyline) or a celestial mechanism (Armillary). Both are
 // generated from the live fleet: N agents, no hand-placed layout, stable visuals per agent.
@@ -11,8 +12,11 @@ type View = "skyline" | "armillary";
 export function Office({ state }: { state: State }) {
   const [view, setView] = useState<View>("skyline");
   const [selected, setSelected] = useState<string | null>(null);
+  const [accent, setAccent] = useState(settings.get().accent);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctrlRef = useRef<SceneController | null>(null);
+
+  useEffect(() => settings.subscribe(() => setAccent(settings.get().accent)), []);
 
   const fleet: FleetAgent[] = state.fleet.map((a) => ({
     agent: a.agent, initials: a.initials, name: a.name, role: a.role,
@@ -27,7 +31,7 @@ export function Office({ state }: { state: State }) {
     ctrlRef.current = build(canvasRef.current, fleet, { onSelect: (a) => setSelected(a) });
     return () => { ctrlRef.current?.dispose(); ctrlRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, fleetKey]);
+  }, [view, fleetKey, accent]);
 
   const lightsOn = state.fleet.filter((a) => a.state === "EXECUTING" || a.state === "TASK_IN_PROGRESS").length;
   const dossier: Agent | undefined = selected ? state.fleet.find((a) => a.agent === selected) : undefined;
