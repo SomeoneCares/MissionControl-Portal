@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -44,6 +45,24 @@ def write_portal_settings(project_dir: Path, patch: dict) -> dict:
     portal_settings_file(project_dir).write_text(
         json.dumps(current, indent=2), encoding="utf-8")
     return current
+
+
+def resolve_portal_token(project_dir: Path) -> str:
+    """The portal's access token — HMC_PORTAL_TOKEN if set, else a stable one generated once
+    and persisted in the project dir so LAN clients authenticate with a real credential."""
+    env = os.environ.get("HMC_PORTAL_TOKEN", "").strip()
+    if env:
+        return env
+    settings = read_portal_settings(project_dir)
+    tok = str(settings.get("auth_token") or "").strip()
+    if not tok:
+        tok = secrets.token_urlsafe(24)
+        write_portal_settings(project_dir, {"auth_token": tok})
+        try:
+            portal_settings_file(project_dir).chmod(0o600)  # token file readable by owner only
+        except OSError:
+            pass
+    return tok
 
 
 def _read_env_file(path: Path) -> dict[str, str]:
@@ -81,6 +100,7 @@ class Config:
     bridge_key: str = field(repr=False, default="")
     host: str = "0.0.0.0"           # portal bind address
     port: int = 51770               # portal bind port
+    portal_token: str = field(repr=False, default="")  # bearer/session token for portal access
 
     @property
     def is_local(self) -> bool:
@@ -146,6 +166,7 @@ def load(env: Optional[dict] = None) -> Config:
                        else (home / "kanban.db")),
             host=getenv("HMC_HOST") or "0.0.0.0",
             port=int(getenv("HMC_PORT") or "51770"),
+            portal_token=resolve_portal_token(project_dir),
         )
 
     # remote
@@ -160,4 +181,5 @@ def load(env: Optional[dict] = None) -> Config:
         bridge_key=getenv("HMC_BRIDGE_KEY"),
         host=getenv("HMC_HOST") or "0.0.0.0",
         port=int(getenv("HMC_PORT") or "51770"),
+        portal_token=resolve_portal_token(project_dir),
     )

@@ -42,6 +42,12 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Document types the content library lists. Text types can be opened in the reader; the rest
+# (PDF, Word) are downloaded via their own route.
+_CONTENT_TEXT_EXTS = {".md", ".txt", ".html", ".htm", ".csv", ".json", ".log"}
+_CONTENT_EXTS = _CONTENT_TEXT_EXTS | {".pdf", ".docx"}
+
+
 def _epoch_iso(v) -> str:
     """Hermes stores timestamps as epoch floats; normalise to ISO. Pass strings through."""
     if v is None:
@@ -389,65 +395,87 @@ class LocalSource:
 
     # -- scheduled jobs (Hermes cron) --------------------------------------
 
+    def _cron_files(self) -> list[tuple[str, Path]]:
+        """Every jobs.json the host holds. Hermes stores cron jobs per profile
+        (``~/.hermes/profiles/<name>/cron/jobs.json``), plus a shared root store for the
+        default agent. Returns (profile_label, path) for each that exists."""
+        found: list[tuple[str, Path]] = []
+        root = self.home / "cron" / "jobs.json"
+        if root.exists():
+            found.append(("", root))
+        profiles = self.home / "profiles"
+        if profiles.is_dir():
+            for d in sorted(profiles.iterdir()):
+                jf = d / "cron" / "jobs.json"
+                if jf.exists():
+                    found.append((d.name, jf))
+        return found
+
     def cron_jobs(self) -> list[dict]:
-        """Scheduled jobs from ~/.hermes/cron/jobs.json, normalised for display."""
+        """Scheduled jobs across the shared root and every profile's cron store, normalised."""
         import json
-        path = self.home / "cron" / "jobs.json"
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return []
-        raw = data.get("jobs", data) if isinstance(data, dict) else data
-        jobs = [j for j in raw if isinstance(j, dict)] if isinstance(raw, list) else []
         out = []
-        for j in jobs:
-            enabled = bool(j.get("enabled"))
-            sched_raw = j.get("schedule") or j.get("cron") or ""
-            if isinstance(sched_raw, dict):
-                sched = sched_raw.get("display") or sched_raw.get("expr") or sched_raw.get("kind") or ""
-            else:
-                sched = sched_raw
-            model = j.get("model") or (j.get("model_options") or {}).get("model") or ""
-            out.append({
-                "id": str(j.get("id") or ""),
-                "name": str(j.get("name") or j.get("id") or "Untitled job"),
-                "enabled": enabled,
-                "state": str(j.get("state") or ("scheduled" if enabled else "paused")),
-                "schedule": str(sched),
-                "next_run_at": j.get("next_run_at"),
-                "last_status": j.get("last_status"),
-                "last_error": j.get("last_error") or j.get("last_delivery_error"),
-                "deliver": j.get("deliver"),
-                "model": str(model),
-                "prompt": str(j.get("prompt") or ""),
-            })
+        for profile, path in self._cron_files():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            raw = data.get("jobs", data) if isinstance(data, dict) else data
+            jobs = [j for j in raw if isinstance(j, dict)] if isinstance(raw, list) else []
+            for j in jobs:
+                enabled = bool(j.get("enabled"))
+                sched_raw = j.get("schedule") or j.get("cron") or ""
+                if isinstance(sched_raw, dict):
+                    sched = sched_raw.get("display") or sched_raw.get("expr") or sched_raw.get("kind") or ""
+                else:
+                    sched = sched_raw
+                model = j.get("model") or (j.get("model_options") or {}).get("model") or ""
+                out.append({
+                    "id": str(j.get("id") or ""),
+                    "name": str(j.get("name") or j.get("id") or "Untitled job"),
+                    "agent": profile or "default",
+                    "enabled": enabled,
+                    "state": str(j.get("state") or ("scheduled" if enabled else "paused")),
+                    "schedule": str(sched),
+                    "next_run_at": _epoch_iso(j.get("next_run_at")) or None,
+                    "last_status": j.get("last_status"),
+                    "last_error": j.get("last_error") or j.get("last_delivery_error"),
+                    "deliver": j.get("deliver"),
+                    "model": str(model),
+                    "prompt": str(j.get("prompt") or ""),
+                })
         out.sort(key=lambda j: (j["enabled"] is not True, j.get("next_run_at") or "9999", j["name"]))
         return out
 
     # -- content library (agent output) ------------------------------------
 
     def content_docs(self, content_dir: Path) -> list[dict]:
-        """Every markdown document under the content directory, grouped by author agent."""
+        """Every document under the content directory, grouped by author agent. Agents write
+        markdown, but also PDFs, plain text, HTML and data files — list them all so nothing an
+        agent produced is hidden from the library."""
         root = Path(content_dir)
         if not root.is_dir():
             return []
         docs = []
-        for md in root.rglob("*.md"):
+        for f in root.rglob("*"):
+            if not f.is_file() or f.suffix.lower() not in _CONTENT_EXTS:
+                continue
             try:
-                rel = md.relative_to(root)
+                rel = f.relative_to(root)
             except ValueError:
                 continue
             agent = rel.parts[0] if len(rel.parts) > 1 else ""
             try:
-                st = md.stat()
-                title = _doc_title(md)
+                st = f.stat()
+                title = _doc_title(f) if f.suffix.lower() == ".md" else f.stem
             except OSError:
                 continue
             docs.append({
                 "agent": agent,
-                "filename": md.name,
+                "filename": f.name,
                 "path": str(rel).replace("\\", "/"),
                 "title": title,
+                "kind": f.suffix.lower().lstrip("."),
                 "modified_at": datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat(),
                 "size": st.st_size,
             })
@@ -455,10 +483,11 @@ class LocalSource:
         return docs
 
     def content_read(self, content_dir: Path, rel_path: str) -> dict:
-        """Read one content document by its path relative to the content directory."""
+        """Read one text content document by its path relative to the content directory. Binary
+        types (PDF, Word) are not read here — the front end downloads those via their own route."""
         root = Path(content_dir).resolve()
         target = (root / rel_path).resolve()
-        if root not in target.parents or target.suffix.lower() != ".md":
+        if root not in target.parents or target.suffix.lower() not in _CONTENT_TEXT_EXTS:
             raise ValueError("invalid content path")
         if not target.is_file():
             return {"path": rel_path, "exists": False, "content": ""}
@@ -570,10 +599,13 @@ def _cpu_percent() -> float:
         vals = [int(x) for x in parts]
         idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
         total = sum(vals)
+        first = _cpu_last["total"] == 0
         di = idle - _cpu_last["idle"]
         dt = total - _cpu_last["total"]
         _cpu_last["idle"], _cpu_last["total"] = idle, total
-        if dt <= 0:
+        # First read has no prior sample — measuring against boot would report the since-boot
+        # average, not "now". Record the baseline and report 0 until the next interval.
+        if first or dt <= 0:
             return 0.0
         return round((1 - di / dt) * 100, 1)
     except (OSError, ValueError, IndexError):

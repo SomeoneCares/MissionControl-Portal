@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type ContentDoc } from "../api/client";
 
-// Content — everything the fleet has written. Browse by author agent, read the markdown.
+// Content — everything the fleet has written. Browse by author agent, read text documents,
+// download the binary ones (PDF, Word) that agents also produce.
+
+const TEXT_KINDS = new Set(["md", "txt", "html", "htm", "csv", "json", "log", ""]);
+const isTextDoc = (d: ContentDoc) => TEXT_KINDS.has((d.kind ?? "md").toLowerCase());
+const isMarkdown = (d: ContentDoc) => (d.kind ?? "md").toLowerCase() === "md";
 
 export function Content() {
   const [docs, setDocs] = useState<ContentDoc[] | null>(null);
@@ -23,7 +28,9 @@ export function Content() {
   const list = (docs ?? []).filter((d) => agent === "all" || d.agent === agent);
 
   const openDoc = async (d: ContentDoc) => {
-    setOpen(d); setBody(""); setLoadingDoc(true); setEditing(false); setMsg(null);
+    setOpen(d); setBody(""); setEditing(false); setMsg(null);
+    if (!isTextDoc(d)) { setLoadingDoc(false); return; }  // binary (PDF/Word) — download only
+    setLoadingDoc(true);
     try { const r = await api.contentRead(d.path); setBody(r.content); } catch { setBody("(failed to load)"); }
     setLoadingDoc(false);
   };
@@ -81,7 +88,10 @@ export function Content() {
               {list.map((d) => (
                 <li key={d.path}>
                   <button className={`content-item ${open?.path === d.path ? "active" : ""}`} onClick={() => openDoc(d)}>
-                    <span className="content-item-title">{d.title}</span>
+                    <span className="content-item-title">
+                      {d.title}
+                      {d.kind && d.kind !== "md" && <span className="content-kind mono">{d.kind}</span>}
+                    </span>
                     <span className="mono muted content-item-meta">
                       {d.agent || "—"} · {new Date(d.modified_at).toLocaleDateString()}
                     </span>
@@ -107,19 +117,27 @@ export function Content() {
                       </>
                     ) : (
                       <>
-                        <button className="content-tool" onClick={() => setEditing(true)}>Edit</button>
+                        {isTextDoc(open) && <button className="content-tool" onClick={() => setEditing(true)}>Edit</button>}
                         <a className="content-tool" href={api.contentDownloadUrl(open.path)} download>Download</a>
-                        <a className="content-tool" href={api.contentWordUrl(open.path)}>Word</a>
+                        {isMarkdown(open) && <a className="content-tool" href={api.contentWordUrl(open.path)}>Word</a>}
                         <button className="content-tool danger" onClick={remove}>Delete</button>
                       </>
                     )}
                   </div>
                 </div>
                 {msg && <p className="pane-msg mono">{msg}</p>}
-                {editing ? (
+                {!isTextDoc(open) ? (
+                  <div className="content-binary empty-block mono">
+                    {open.kind?.toUpperCase()} document · {(open.size / 1024).toFixed(0)} KB
+                    <br />
+                    <a className="content-tool" href={api.contentDownloadUrl(open.path)} download>Download to view</a>
+                  </div>
+                ) : editing ? (
                   <textarea className="content-editor mono" value={body} onChange={(e) => setBody(e.target.value)} spellCheck={false} />
-                ) : (
+                ) : isMarkdown(open) ? (
                   <div className="content-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }} />
+                ) : (
+                  <pre className="content-body content-plain mono">{body}</pre>
                 )}
               </>
             )}

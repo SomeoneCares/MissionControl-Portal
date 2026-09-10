@@ -10,12 +10,14 @@ provider serves the request.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 from . import config as config_mod
 
@@ -23,6 +25,29 @@ from . import config as config_mod
 def _slug(name: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
     return s or uuid.uuid4().hex[:8]
+
+
+# link-local / cloud-metadata ranges — a fleet URL must never target these (SSRF guard). Private
+# LAN ranges are deliberately allowed: connecting to a LAN Hermes host is the whole point.
+_BLOCKED_NETS = (ipaddress.ip_network("169.254.0.0/16"), ipaddress.ip_network("fe80::/10"))
+
+
+def _check_fleet_url(url: str, label: str) -> str:
+    """Validate a user-supplied fleet URL; return it normalised, or raise ValueError."""
+    url = (url or "").strip().rstrip("/")
+    if not url:
+        return ""
+    p = urlparse(url)
+    if p.scheme not in ("http", "https") or not p.hostname:
+        raise ValueError(f"{label} must be a full http(s):// URL")
+    ip = None
+    try:
+        ip = ipaddress.ip_address(p.hostname)
+    except ValueError:
+        ip = None  # a hostname, not an IP literal — allowed
+    if ip is not None and any(ip in net for net in _BLOCKED_NETS):
+        raise ValueError(f"{label} points at a link-local/metadata address, which is not allowed")
+    return url
 
 
 @dataclass
@@ -85,6 +110,7 @@ class FleetRegistry:
         } for f in self.fleets.values() if not f.primary]
         try:
             self._store.write_text(json.dumps({"fleets": extra}, indent=2), encoding="utf-8")
+            self._store.chmod(0o600)  # holds bridge/gateway tokens — owner-only
         except OSError:
             pass
 
@@ -116,12 +142,14 @@ class FleetRegistry:
         fid = _slug(name)
         while fid in self.fleets:
             fid = f"{_slug(name)}-{uuid.uuid4().hex[:4]}"
+        bridge_url = _check_fleet_url(str(spec.get("bridge_url") or ""), "Bridge URL")
+        gateway_url = _check_fleet_url(str(spec.get("gateway_url") or ""), "Gateway URL")
+        if not bridge_url and not gateway_url:
+            raise ValueError("give a bridge URL, a gateway URL, or both")
         fl = Fleet(
             id=fid, name=name, accent=str(spec.get("accent") or ""), mode="remote",
-            bridge_url=str(spec.get("bridge_url") or "").rstrip("/"),
-            bridge_key=str(spec.get("bridge_key") or ""),
-            gateway_url=str(spec.get("gateway_url") or "").rstrip("/"),
-            gateway_key=str(spec.get("gateway_key") or ""))
+            bridge_url=bridge_url, bridge_key=str(spec.get("bridge_key") or ""),
+            gateway_url=gateway_url, gateway_key=str(spec.get("gateway_key") or ""))
         self.fleets[fl.id] = fl
         self._save()
         return fl

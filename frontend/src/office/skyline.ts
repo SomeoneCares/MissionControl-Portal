@@ -368,7 +368,6 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[], opt
   renderer.domElement.addEventListener("pointerdown", onDown);
   renderer.domElement.addEventListener("pointerup", onUp);
   renderer.domElement.addEventListener("pointermove", onMove);
-  renderer.domElement.addEventListener("start", () => { controls.autoRotate = false; });
   controls.addEventListener("start", () => { controls.autoRotate = false; });
   controls.addEventListener("end", () => { window.setTimeout(() => { controls.autoRotate = true; }, 2500); });
 

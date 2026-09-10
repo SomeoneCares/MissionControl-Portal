@@ -17,9 +17,12 @@ handlers never care which mode they run in.
 """
 from __future__ import annotations
 
+import hmac
 import json
 import os
+import secrets
 import time
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, quote
@@ -302,16 +305,84 @@ class DataProvider:
         return data
 
 
+# Valid session ids from a successful token login. In-memory (per process): a restart simply
+# asks each browser to log in again. The raw token is never stored in the cookie.
+_AUTH_SESSIONS: set[str] = set()
+_COOKIE = "hmc_session"
+# API paths reachable without a session (liveness + the login flow itself).
+_OPEN_PATHS = {"/api/health", "/api/auth/login", "/api/auth/status", "/api/auth/logout"}
+
+
 class Handler(BaseHTTPRequestHandler):
     provider: DataProvider = None   # per-request, resolved from the selected fleet
     registry: FleetRegistry = None
     dist_dir: Path = None
+    auth_token: str = ""            # the portal access token (from cfg.portal_token)
 
     server_version = "HermesMC/0.1"
 
     def _fleet_id(self) -> str:
         q = parse_qs(urlparse(self.path).query).get("fleet", [""])[0]
         return q or self.headers.get("X-Fleet") or "primary"
+
+    # -- auth -------------------------------------------------------------
+
+    def _session_id(self) -> str:
+        raw = self.headers.get("Cookie") or ""
+        try:
+            return SimpleCookie(raw).get(_COOKIE).value  # type: ignore[union-attr]
+        except (AttributeError, Exception):
+            return ""
+
+    def _authed(self) -> bool:
+        if not self.auth_token:
+            return True  # auth disabled (no token) — never happens in normal runs
+        sid = self._session_id()
+        if sid and sid in _AUTH_SESSIONS:
+            return True
+        # also accept a raw bearer token, for scripts/CLI clients
+        bearer = (self.headers.get("Authorization") or "")[7:] \
+            if (self.headers.get("Authorization") or "").lower().startswith("bearer ") else ""
+        return bool(bearer) and hmac.compare_digest(bearer, self.auth_token)
+
+    def _needs_auth(self, path: str) -> bool:
+        if path in _OPEN_PATHS:
+            return False
+        return path.startswith("/api/") or path == "/events"
+
+    def _gate(self, path: str) -> bool:
+        """True if the request may proceed; sends 401 and returns False otherwise."""
+        if self._needs_auth(path) and not self._authed():
+            self._json({"error": "authentication required", "code": "unauthorized"}, status=401)
+            return False
+        return True
+
+    def _handle_login(self, body: dict):
+        token = str(body.get("token") or "")
+        if not self.auth_token or not hmac.compare_digest(token, self.auth_token):
+            return self._json({"ok": False, "error": "invalid token"}, status=401)
+        sid = secrets.token_urlsafe(24)
+        _AUTH_SESSIONS.add(sid)
+        payload = json.dumps({"ok": True}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        # 30-day HttpOnly session cookie. SameSite=Lax; no Secure flag (LAN is plain http).
+        self.send_header("Set-Cookie",
+                         f"{_COOKIE}={sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _handle_logout(self):
+        _AUTH_SESSIONS.discard(self._session_id())
+        payload = json.dumps({"ok": True}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Set-Cookie", f"{_COOKIE}=; Path=/; Max-Age=0")
+        self.end_headers()
+        self.wfile.write(payload)
 
     # -- helpers ----------------------------------------------------------
 
@@ -324,9 +395,17 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    _MAX_BODY = 32 * 1024 * 1024  # 32 MB — generous for base64 image attachments, but bounded
+
     def _read_body(self) -> dict:
-        length = int(self.headers.get("Content-Length") or 0)
-        if not length:
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return {}
+        if length <= 0:
+            return {}
+        if length > self._MAX_BODY:  # refuse an oversized body instead of buffering it
+            self.rfile.read(min(length, self._MAX_BODY))  # drain a bounded amount to keep the stream sane
             return {}
         try:
             return json.loads(self.rfile.read(length).decode("utf-8"))
@@ -340,6 +419,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if not self._gate(path):
+            return
+        if path == "/api/auth/status":
+            return self._json({"authed": self._authed(), "required": bool(self.auth_token)})
         if self.registry is not None:
             self.provider = self.registry.provider(self._fleet_id())
         if path == "/api/fleets":
@@ -384,7 +467,7 @@ class Handler(BaseHTTPRequestHandler):
                     ctype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 else:
                     data, fname = cs.raw(rel)
-                    ctype = "text/markdown; charset=utf-8"
+                    ctype = _content_type(Path(fname).suffix)
             except ContentError as e:
                 return self._json({"error": str(e)}, status=400)
             self.send_response(200)
@@ -417,11 +500,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if not self._gate(path):
+            return
         body = self._read_body()
+        if path == "/api/auth/login":
+            return self._handle_login(body)
+        if path == "/api/auth/logout":
+            return self._handle_logout()
         if self.registry is not None:
             self.provider = self.registry.provider(self._fleet_id())
         if path == "/api/fleets":
-            return self._json(self.registry.add(body).public())
+            try:
+                return self._json(self.registry.add(body).public())
+            except ValueError as e:
+                return self._json({"error": str(e)}, status=400)
         if path == "/api/fleets/remove":
             return self._json({"removed": self.registry.remove(body.get("id", ""))})
         try:
@@ -667,9 +759,14 @@ class Handler(BaseHTTPRequestHandler):
 
 def _content_type(suffix: str) -> str:
     return {
-        ".html": "text/html; charset=utf-8", ".js": "text/javascript",
+        ".html": "text/html; charset=utf-8", ".htm": "text/html; charset=utf-8",
+        ".js": "text/javascript",
         ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml",
         ".png": "image/png", ".jpg": "image/jpeg", ".woff2": "font/woff2",
+        ".md": "text/markdown; charset=utf-8", ".txt": "text/plain; charset=utf-8",
+        ".log": "text/plain; charset=utf-8", ".csv": "text/csv; charset=utf-8",
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     }.get(suffix.lower(), "application/octet-stream")
 
 
@@ -679,6 +776,7 @@ def make_server(cfg: config_mod.Config) -> ThreadingHTTPServer:
     Handler.registry = registry
     Handler.provider = registry.provider("primary")
     Handler.dist_dir = dist
+    Handler.auth_token = cfg.portal_token
     httpd = ThreadingHTTPServer((cfg.host, cfg.port), Handler)
     return httpd
 
@@ -687,6 +785,10 @@ def main():
     cfg = config_mod.load()
     httpd = make_server(cfg)
     print(f"Hermes Mission Control — mode={cfg.mode} — http://{cfg.host}:{cfg.port}")
+    if cfg.portal_token:
+        print("  access token (needed to sign in over the LAN): " + cfg.portal_token)
+        print("  it is stored in " + str(config_mod.portal_settings_file(cfg.project_dir))
+              + " — rotate by deleting 'auth_token' there or setting HMC_PORTAL_TOKEN")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

@@ -14,17 +14,34 @@ class ContentError(RuntimeError):
     pass
 
 
+# Types the library exposes for download/delete. Editing and Word export stay markdown-only.
+_DOWNLOADABLE = {".md", ".txt", ".html", ".htm", ".csv", ".json", ".log", ".pdf", ".docx"}
+
+
 class ContentStore:
     def __init__(self, content_dir: Path):
         self.root = Path(content_dir)
 
-    def _safe(self, rel_path: str) -> Path:
+    def _within(self, rel_path: str) -> Path:
+        """Resolve a path and guarantee it stays inside the content root (no extension check)."""
         target = (self.root / rel_path).resolve()
         root = self.root.resolve()
         if root not in target.parents and target != root:
             raise ContentError("path outside the content directory")
+        return target
+
+    def _safe(self, rel_path: str) -> Path:
+        """Markdown-only resolve, for the edit/create/Word paths."""
+        target = self._within(rel_path)
         if target.suffix.lower() != ".md":
             raise ContentError("only markdown documents are editable")
+        return target
+
+    def _safe_any(self, rel_path: str) -> Path:
+        """Resolve any downloadable document type inside the content root."""
+        target = self._within(rel_path)
+        if target.suffix.lower() not in _DOWNLOADABLE:
+            raise ContentError("unsupported document type")
         return target
 
     def save(self, rel_path: str, text: str) -> dict:
@@ -50,14 +67,14 @@ class ContentStore:
         return {"ok": True, "path": rel, "agent": agent, "filename": name}
 
     def delete(self, rel_path: str) -> dict:
-        target = self._safe(rel_path)
+        target = self._safe_any(rel_path)
         if not target.exists():
             raise ContentError("document not found")
         target.unlink()
         return {"ok": True, "path": rel_path}
 
     def raw(self, rel_path: str) -> tuple[bytes, str]:
-        target = self._safe(rel_path)
+        target = self._safe_any(rel_path)
         if not target.exists():
             raise ContentError("document not found")
         return target.read_bytes(), target.name

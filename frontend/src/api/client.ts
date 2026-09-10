@@ -39,6 +39,9 @@ export interface FleetInfo {
 
 export const api = {
   health: () => getJSON<HealthInfo>("/api/health"),
+  authStatus: () => getJSON<{ authed: boolean; required: boolean }>("/api/auth/status"),
+  login: (token: string) => postJSON<{ ok: boolean }>("/api/auth/login", { token }),
+  logout: () => postJSON<{ ok: boolean }>("/api/auth/logout", {}),
   state: () => getJSON<State>("/api/state"),
   capabilities: () => getJSON<Record<string, unknown>>("/api/capabilities"),
   toolsets: () => getJSON<{ data: { name: string }[] }>("/api/toolsets"),
@@ -127,6 +130,7 @@ export interface AgentFile {
 export interface CronJob {
   id: string;
   name: string;
+  agent?: string;
   enabled: boolean;
   state: string;
   schedule: string;
@@ -154,6 +158,7 @@ export interface ContentDoc {
   filename: string;
   path: string;
   title: string;
+  kind?: string;   // file extension without the dot: "md" | "pdf" | "txt" | …
   modified_at: string;
   size: number;
 }

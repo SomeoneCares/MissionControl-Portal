@@ -11,6 +11,7 @@ import { Content } from "./tabs/Content";
 import { Schedule } from "./tabs/Schedule";
 import { Office } from "./tabs/Office";
 import { Settings } from "./tabs/Settings";
+import { Login } from "./Login";
 import "./styles/app.css";
 
 const TABS = ["Overview", "Agents", "Chat", "Runs", "Tasks", "Office", "Content", "Schedule", "Settings"] as const;
@@ -23,16 +24,30 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [fleets, setFleets] = useState<FleetInfo[]>([]);
   const [brand, setBrand] = useState(settings.get().portalName);
+  // null = still checking; true = show app; false = show login gate.
+  const [authed, setAuthed] = useState<boolean | null>(null);
 
   useEffect(() => {
     applySettings();
     const un = settings.subscribe(() => setBrand(settings.get().portalName));
+    api.authStatus()
+      .then((s) => setAuthed(!s.required || s.authed))
+      .catch(() => setAuthed(true)); // status endpoint is open; if it fails, let the app try
+    return () => { un(); };
+  }, []);
+
+  // Load live data only once past the auth gate, so we never fire a wall of 401s at the login screen.
+  useEffect(() => {
+    if (authed !== true) return;
     api.health().then(setHealth).catch((e) => setError(String(e)));
     api.state().then(setState).catch((e) => setError(String(e)));
     api.fleets().then((d) => setFleets(d.fleets)).catch(() => setFleets([]));
     const stop = subscribeState(setState);
-    return () => { un(); stop(); };
-  }, []);
+    return () => { stop(); };
+  }, [authed]);
+
+  if (authed === null) return <div className="loading mono">loading…</div>;
+  if (authed === false) return <Login onAuthed={() => setAuthed(true)} />;
 
   return (
     <div className="app">
@@ -65,6 +80,10 @@ export function App() {
               {health.mode} · gateway {health.gateway?.ok ? "live" : "down"}
             </span>
           )}
+          <button className="signout mono" title="Sign out"
+                  onClick={() => { api.logout().finally(() => setAuthed(false)); }}>
+            Sign out
+          </button>
         </div>
       </header>
 
