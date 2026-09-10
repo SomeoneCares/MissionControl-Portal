@@ -28,3 +28,4 @@ reference/
 frontend/build.log
 backend/server.log
 .git-msg.tmp
+scratch-*
