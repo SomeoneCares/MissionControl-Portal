@@ -1,0 +1,22 @@
+Runs, Schedule, Content tabs + run control (stop/steer/approvals)
+
+Run control (the layer promised after the tool timeline):
+- Chat Stop now stops the real run on the gateway via run_stop, not just the
+  client stream; the run id is captured from the run event
+- approval prompts render in-thread with choice buttons, POST to the run
+  approval endpoint
+- steer endpoint wired
+
+New tabs, all real data:
+- Runs: execution history from the agent log, filter to failures, failed
+  rows highlighted (surfaces the server's 3 failed runs)
+- Schedule: Hermes cron jobs, with schedule, next run, last status, and any
+  error surfaced; dict-shaped schedules normalised to their display form
+- Content: agent output library, filter by author, markdown reader
+
+Backend: cron_jobs / content_docs / content_read in the data layer; new
+endpoints for schedule, content read, and run stop/steer/approval.
+Verified on the server: 1 cron job with its error surfaced, 21 content docs
+rendering; on WSL both are honest-empty.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>

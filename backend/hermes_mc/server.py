@@ -65,6 +65,48 @@ class DataProvider:
         except GatewayError:
             return []
 
+    def cron_jobs(self) -> list[dict]:
+        if self._local:
+            return self._local.cron_jobs()
+        return self._remote_list("/schedule", "jobs")
+
+    def content_docs(self) -> list[dict]:
+        if self._local and self.cfg.content_dir:
+            return self._local.content_docs(self.cfg.content_dir)
+        return self._remote_list("/content", "docs")
+
+    def content_read(self, rel_path: str) -> dict:
+        if self._local and self.cfg.content_dir:
+            return self._local.content_read(self.cfg.content_dir, rel_path)
+        return {"path": rel_path, "exists": False, "content": ""}
+
+    def _remote_list(self, path: str, key: str) -> list:
+        import urllib.request
+        try:
+            req = urllib.request.Request(
+                f"{self.cfg.bridge_url}{path}",
+                headers={"Authorization": f"Bearer {self.cfg.bridge_key}"})
+            with urllib.request.urlopen(req, timeout=10.0) as r:
+                return json.loads(r.read().decode("utf-8")).get(key, [])
+        except Exception:  # noqa: BLE001
+            return []
+
+    def stop_run(self, run_id: str, agent: str | None) -> dict:
+        if not self.gateway or not run_id:
+            return {"ok": False}
+        try:
+            return self.gateway.run_stop(run_id, profile=self.chat_route(agent))
+        except GatewayError as e:
+            return {"ok": False, "error": str(e)}
+
+    def steer_run(self, run_id: str, text: str, agent: str | None) -> dict:
+        if not self.gateway or not run_id:
+            return {"ok": False}
+        try:
+            return self.gateway.run_steer(run_id, text, profile=self.chat_route(agent))
+        except GatewayError as e:
+            return {"ok": False, "error": str(e)}
+
     def skills(self) -> list[dict]:
         if not self.gateway:
             return []
@@ -195,6 +237,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"data": self.provider.skills()})
         if path == "/api/chat/agents":
             return self._json(self.provider.chat_agents())
+        if path == "/api/schedule":
+            return self._json({"jobs": self.provider.cron_jobs()})
+        if path == "/api/content":
+            return self._json({"docs": self.provider.content_docs()})
+        if path == "/api/content/read":
+            rel = parse_qs(urlparse(self.path).query).get("path", [""])[0]
+            try:
+                return self._json(self.provider.content_read(rel))
+            except ValueError as e:
+                return self._json({"error": str(e)}, status=400)
         if path == "/api/models":
             if not self.provider.admin:
                 return self._json({"models": [], "editable": False})
@@ -227,6 +279,23 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"deleted": self.provider.board.delete(body.get("id", ""))})
             if path == "/api/chat":
                 return self._chat_stream(body)
+            if path == "/api/runs/stop":
+                return self._json(self.provider.stop_run(body.get("run", ""), body.get("agent")))
+            if path == "/api/runs/steer":
+                return self._json(self.provider.steer_run(
+                    body.get("run", ""), body.get("text", ""), body.get("agent")))
+            if path == "/api/runs/approval":
+                gw = self.provider.gateway
+                if not gw:
+                    return self._json({"ok": False}, status=503)
+                try:
+                    prof = self.provider.chat_route(body.get("agent"))
+                    res = gw._request("POST", gw._p(prof, f"/v1/runs/{body.get('run','')}/approval"),
+                                      body={"choice": body.get("choice", ""),
+                                            "request_id": body.get("request_id")})
+                    return self._json(res or {"ok": True})
+                except GatewayError as e:
+                    return self._json({"ok": False, "error": str(e)}, status=400)
             if path == "/api/agents/model":
                 return self._admin_write(lambda: self.provider.admin.set_model(
                     body.get("agent", ""), body.get("model", ""), body.get("provider", "")))

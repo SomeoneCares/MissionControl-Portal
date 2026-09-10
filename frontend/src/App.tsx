@@ -4,7 +4,10 @@ import { api, subscribeState } from "./api/client";
 import { Overview } from "./tabs/Overview";
 import { Agents } from "./tabs/Agents";
 import { Chat } from "./tabs/Chat";
+import { Runs } from "./tabs/Runs";
 import { Tasks } from "./tabs/Tasks";
+import { Content } from "./tabs/Content";
+import { Schedule } from "./tabs/Schedule";
 import "./styles/app.css";
 
 const TABS = ["Overview", "Agents", "Chat", "Runs", "Tasks", "Office", "Content", "Schedule"] as const;
@@ -56,11 +59,14 @@ export function App() {
         {state && tab === "Overview" && <Overview state={state} health={health} />}
         {state && tab === "Agents" && <Agents state={state} />}
         {state && tab === "Chat" && <Chat state={state} health={health} />}
+        {state && tab === "Runs" && <Runs state={state} />}
         {tab === "Tasks" && <Tasks />}
-        {state && !["Overview", "Agents", "Chat", "Tasks"].includes(tab) && (
+        {tab === "Content" && <Content />}
+        {tab === "Schedule" && <Schedule />}
+        {state && tab === "Office" && (
           <div className="placeholder">
             <span className="eyebrow">{tab}</span>
-            <p className="mono">This tab is next in the build. Live data is already flowing.</p>
+            <p className="mono">The skyline + Armillary office is the last tab in the build.</p>
           </div>
         )}
       </main>

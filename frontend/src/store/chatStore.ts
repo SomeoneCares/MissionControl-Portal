@@ -9,6 +9,8 @@ export interface Turn extends ChatMessage {
   reasoning?: string;
   tools?: ToolEvent[];
   atts?: { name: string; kind: string }[];
+  runId?: string;
+  approval?: { choices: { label?: string; value?: string; id?: string }[]; text: string } | null;
   ts?: number;
 }
 

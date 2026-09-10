@@ -120,9 +120,11 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
 
     const payload: ChatMessage[] = history.map((t) => ({ role: t.role, content: t.content }));
     aborts[key] = chatStream(payload, activeProfile, {
+      onRun: (runId) => chatStore.patchLast(key, (last) => { last.runId = runId; }),
       onDelta: (d) => chatStore.patchLast(key, (last) => { if (last.streaming) last.content += d; }),
       onReasoning: (text) => chatStore.patchLast(key, (last) => { last.reasoning = text; }),
       onTool: (t) => chatStore.patchLast(key, (last) => { last.tools = [...(last.tools ?? []), t]; }),
+      onApproval: (a) => chatStore.patchLast(key, (last) => { last.approval = a; }),
       onDone: () => {
         chatStore.patchLast(key, (last) => { last.streaming = false; });
         chatStore.persist();
@@ -137,10 +139,22 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
   };
 
   const stop = () => {
+    // stop the real run on the gateway, then stop consuming the stream
+    const t = threads[current];
+    const runId = t?.[t.length - 1]?.runId;
+    if (runId) api.stopRun(runId, activeProfile).catch(() => {});
     aborts[current]?.();
     delete aborts[current];
     chatStore.patchLast(current, (last) => { if (last.streaming) last.streaming = false; });
     chatStore.persist();
+  };
+
+  const respondApproval = (choice: string) => {
+    const t = threads[current];
+    const last = t?.[t.length - 1];
+    if (!last?.runId) return;
+    api.approve(last.runId, choice, activeProfile).catch(() => {});
+    chatStore.patchLast(current, (l) => { l.approval = null; });
   };
 
   const clearThread = () => {
@@ -242,6 +256,19 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
                 )}
                 {t.role === "assistant" && t.streaming && !t.content && !t.reasoning && (
                   <div className="bubble-body thinking-dots"><span /><span /><span /></div>
+                )}
+                {t.role === "assistant" && t.approval && (
+                  <div className="approval">
+                    <span className="mono approval-label">⚑ approval needed</span>
+                    {t.approval.text && <p className="approval-text">{t.approval.text}</p>}
+                    <div className="approval-choices">
+                      {(t.approval.choices.length ? t.approval.choices : [{ label: "Approve", value: "approve" }, { label: "Deny", value: "deny" }]).map((c, k) => (
+                        <button key={k} className="approval-btn" onClick={() => respondApproval(c.value || c.id || c.label || "")}>
+                          {c.label || c.value || c.id}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             ))}

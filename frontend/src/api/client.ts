@@ -36,6 +36,17 @@ export const api = {
   saveFile: (agent: string, name: string, content: string) =>
     postJSON<{ ok: boolean; size: number; backup: string | null }>(
       "/api/agents/file", { agent, name, content }),
+  stopRun: (run: string, agent: string | null) =>
+    postJSON<{ ok: boolean }>("/api/runs/stop", { run, agent }),
+  steerRun: (run: string, text: string, agent: string | null) =>
+    postJSON<{ ok: boolean }>("/api/runs/steer", { run, text, agent }),
+  approve: (run: string, choice: string, agent: string | null, request_id?: string) =>
+    postJSON<{ ok: boolean }>("/api/runs/approval", { run, choice, agent, request_id }),
+  schedule: () => getJSON<{ jobs: CronJob[] }>("/api/schedule"),
+  content: () => getJSON<{ docs: ContentDoc[] }>("/api/content"),
+  contentRead: (p: string) =>
+    getJSON<{ path: string; exists: boolean; content: string }>(
+      `/api/content/read?path=${encodeURIComponent(p)}`),
   board: {
     list: () => getJSON<{ tasks: BoardTask[] }>("/api/board"),
     create: (t: { title: string; priority?: string; status?: string }) =>
@@ -71,16 +82,46 @@ export interface AgentFile {
   size: number;
 }
 
+export interface CronJob {
+  id: string;
+  name: string;
+  enabled: boolean;
+  state: string;
+  schedule: string;
+  next_run_at: string | null;
+  last_status: string | null;
+  last_error: string | null;
+  deliver: string | null;
+  model: string;
+  prompt: string;
+}
+
+export interface ContentDoc {
+  agent: string;
+  filename: string;
+  path: string;
+  title: string;
+  modified_at: string;
+  size: number;
+}
+
 export interface ToolEvent {
   phase: "started" | "completed";
   name: string;
   preview: string;
 }
 
+export interface ApprovalReq {
+  choices: { label?: string; value?: string; id?: string }[];
+  text: string;
+}
+
 export interface ChatHandlers {
   onDelta: (t: string) => void;
   onReasoning?: (text: string) => void;
   onTool?: (t: ToolEvent) => void;
+  onRun?: (runId: string) => void;
+  onApproval?: (a: ApprovalReq) => void;
   onDone: () => void;
   onError: (e: string) => void;
 }
@@ -131,9 +172,10 @@ export function chatStream(
             if (obj.delta) handlers.onDelta(obj.delta);
             else if (obj.reasoning !== undefined) handlers.onReasoning?.(obj.reasoning);
             else if (obj.tool) handlers.onTool?.(obj.tool);
+            else if (obj.run) handlers.onRun?.(obj.run);
+            else if (obj.approval) handlers.onApproval?.(obj.approval);
             else if (obj.error) handlers.onError(obj.error);
             else if (obj.done) handlers.onDone();
-            // obj.run / obj.approval reserved for stop-steer and approvals (next layer)
           } catch {
             /* ignore malformed frame */
           }

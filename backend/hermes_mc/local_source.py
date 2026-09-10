@@ -59,6 +59,18 @@ def _title(agent: str) -> str:
     return agent.replace("-", " ").replace("_", " ").title()
 
 
+def _doc_title(path: Path) -> str:
+    """First markdown heading, else a title made from the filename."""
+    try:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines()[:20]:
+            if line.lstrip().startswith("#"):
+                return line.lstrip("# ").strip()[:100]
+    except OSError:
+        pass
+    stem = re.sub(r"^\d{4}-\d{2}-\d{2}[_-]?", "", path.stem)
+    return stem.replace("-", " ").replace("_", " ").strip().title() or "Untitled"
+
+
 # ---------------------------------------------------------------------------
 # the source
 # ---------------------------------------------------------------------------
@@ -261,6 +273,84 @@ class LocalSource:
         except sqlite3.Error:
             pass
         return {"totals": totals}
+
+    # -- scheduled jobs (Hermes cron) --------------------------------------
+
+    def cron_jobs(self) -> list[dict]:
+        """Scheduled jobs from ~/.hermes/cron/jobs.json, normalised for display."""
+        import json
+        path = self.home / "cron" / "jobs.json"
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        raw = data.get("jobs", data) if isinstance(data, dict) else data
+        jobs = [j for j in raw if isinstance(j, dict)] if isinstance(raw, list) else []
+        out = []
+        for j in jobs:
+            enabled = bool(j.get("enabled"))
+            sched_raw = j.get("schedule") or j.get("cron") or ""
+            if isinstance(sched_raw, dict):
+                sched = sched_raw.get("display") or sched_raw.get("expr") or sched_raw.get("kind") or ""
+            else:
+                sched = sched_raw
+            model = j.get("model") or (j.get("model_options") or {}).get("model") or ""
+            out.append({
+                "id": str(j.get("id") or ""),
+                "name": str(j.get("name") or j.get("id") or "Untitled job"),
+                "enabled": enabled,
+                "state": str(j.get("state") or ("scheduled" if enabled else "paused")),
+                "schedule": str(sched),
+                "next_run_at": j.get("next_run_at"),
+                "last_status": j.get("last_status"),
+                "last_error": j.get("last_error") or j.get("last_delivery_error"),
+                "deliver": j.get("deliver"),
+                "model": str(model),
+                "prompt": str(j.get("prompt") or ""),
+            })
+        out.sort(key=lambda j: (j["enabled"] is not True, j.get("next_run_at") or "9999", j["name"]))
+        return out
+
+    # -- content library (agent output) ------------------------------------
+
+    def content_docs(self, content_dir: Path) -> list[dict]:
+        """Every markdown document under the content directory, grouped by author agent."""
+        root = Path(content_dir)
+        if not root.is_dir():
+            return []
+        docs = []
+        for md in root.rglob("*.md"):
+            try:
+                rel = md.relative_to(root)
+            except ValueError:
+                continue
+            agent = rel.parts[0] if len(rel.parts) > 1 else ""
+            try:
+                st = md.stat()
+                title = _doc_title(md)
+            except OSError:
+                continue
+            docs.append({
+                "agent": agent,
+                "filename": md.name,
+                "path": str(rel).replace("\\", "/"),
+                "title": title,
+                "modified_at": datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat(),
+                "size": st.st_size,
+            })
+        docs.sort(key=lambda d: d["modified_at"], reverse=True)
+        return docs
+
+    def content_read(self, content_dir: Path, rel_path: str) -> dict:
+        """Read one content document by its path relative to the content directory."""
+        root = Path(content_dir).resolve()
+        target = (root / rel_path).resolve()
+        if root not in target.parents or target.suffix.lower() != ".md":
+            raise ValueError("invalid content path")
+        if not target.is_file():
+            return {"path": rel_path, "exists": False, "content": ""}
+        return {"path": rel_path, "exists": True,
+                "content": target.read_text(encoding="utf-8", errors="replace")}
 
     # -- the assembled state payload ---------------------------------------
 
