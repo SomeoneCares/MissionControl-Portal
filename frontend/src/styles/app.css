@@ -215,3 +215,26 @@
 .roster-sub { font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
 .roster-busy { width: 7px; height: 7px; border-radius: 50%; background: var(--ember); animation: blink 1s steps(2) infinite; flex: none; }
 .roster-note { font-size: 10px; color: var(--muted); margin: 12px 4px 0; line-height: 1.5; }
+
+/* ===== chat: thinking + tool timeline ===== */
+.thinking { align-self: flex-start; max-width: 80%; margin-bottom: 6px; border: 1px solid var(--line); border-left: 2px solid var(--spot); border-radius: 10px; background: var(--panel-2); overflow: hidden; }
+.thinking.live { border-left-color: var(--ember); }
+.thinking-head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: transparent; border: none; cursor: pointer; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.thinking-icon { color: var(--spot); }
+.thinking.live .thinking-icon { color: var(--ember); animation: spin 1.4s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.thinking-toggle { margin-left: auto; color: var(--spot); }
+.thinking-body { padding: 0 12px 12px; }
+.reasoning-text { font-size: 12.5px; line-height: 1.55; color: var(--ink-soft); margin: 4px 0 0; white-space: pre-wrap; font-style: italic; }
+.tool-timeline { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.tool-ev { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.tool-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); flex: none; }
+.tool-ev.started .tool-dot { background: var(--ember); }
+.tool-ev.completed .tool-dot { background: var(--ok); }
+.tool-name { color: var(--ink); font-weight: 500; }
+.tool-phase { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; }
+.tool-preview { color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thinking-dots { display: flex; gap: 4px; align-items: center; }
+.thinking-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--ember); animation: blink 1.2s steps(2) infinite; }
+.thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+.thinking-dots span:nth-child(3) { animation-delay: 0.4s; }

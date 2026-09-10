@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { State, HealthInfo, Agent } from "../types";
-import { api, chatStream, type ChatMessage, type ChatAgents } from "../api/client";
+import { api, chatStream, type ChatMessage, type ChatAgents, type ToolEvent } from "../api/client";
 
 // Chat — the comms surface. Pick an agent on the left, talk to it on the right. Each reply is a
 // real streamed agent turn. Per-agent selection uses the gateway's multiplex prefix; when
@@ -11,6 +11,8 @@ import { api, chatStream, type ChatMessage, type ChatAgents } from "../api/clien
 
 interface Turn extends ChatMessage {
   streaming?: boolean;
+  reasoning?: string;
+  tools?: ToolEvent[];
 }
 
 const DEFAULT_KEY = "__default__"; // the single gateway agent when multiplexing is off
@@ -79,6 +81,8 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
 
     abortRef.current = chatStream(payload, activeProfile, {
       onDelta: (d) => patchLast((last) => { if (last.streaming) last.content += d; }),
+      onReasoning: (text) => patchLast((last) => { last.reasoning = text; }),
+      onTool: (t) => patchLast((last) => { last.tools = [...(last.tools ?? []), t]; }),
       onDone: () => {
         patchLast((last) => { last.streaming = false; });
         setBusy((b) => ({ ...b, [key]: false }));
@@ -167,10 +171,18 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
                 <span className="bubble-role mono">
                   {t.role === "user" ? "you" : (activeProfile ? (fleetByName[activeProfile]?.name ?? "hermes") : "hermes")}
                 </span>
-                <div className="bubble-body">
-                  {t.content}
-                  {t.streaming && <span className="caret" />}
-                </div>
+                {t.role === "assistant" && (t.reasoning || (t.tools && t.tools.length > 0)) && (
+                  <Thinking reasoning={t.reasoning} tools={t.tools} live={!!t.streaming} />
+                )}
+                {(t.content || t.role === "user" || !t.streaming) && (
+                  <div className="bubble-body">
+                    {t.content || (t.role === "assistant" && !t.streaming ? "(no answer)" : "")}
+                    {t.streaming && t.content && <span className="caret" />}
+                  </div>
+                )}
+                {t.role === "assistant" && t.streaming && !t.content && !t.reasoning && (
+                  <div className="bubble-body thinking-dots"><span /><span /><span /></div>
+                )}
               </div>
             ))}
           </div>
@@ -193,6 +205,36 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
           </div>
         </section>
       </div>
+    </div>
+  );
+}
+
+function Thinking({ reasoning, tools, live }: { reasoning?: string; tools?: ToolEvent[]; live: boolean }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className={`thinking ${live ? "live" : ""}`}>
+      <button className="thinking-head mono" onClick={() => setOpen((o) => !o)}>
+        <span className="thinking-icon">{live ? "◐" : "◑"}</span>
+        {live ? "thinking…" : "thought process"}
+        <span className="thinking-toggle">{open ? "hide" : "show"}</span>
+      </button>
+      {open && (
+        <div className="thinking-body">
+          {reasoning && <p className="reasoning-text">{reasoning}</p>}
+          {tools && tools.length > 0 && (
+            <ul className="tool-timeline">
+              {tools.map((t, i) => (
+                <li key={i} className={`tool-ev ${t.phase}`}>
+                  <span className="tool-dot" />
+                  <span className="mono tool-name">{t.name}</span>
+                  <span className="mono tool-phase">{t.phase}</span>
+                  {t.preview && <span className="tool-preview">{t.preview}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }

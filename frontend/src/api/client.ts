@@ -45,12 +45,26 @@ export interface ChatAgents {
   agents: string[];
 }
 
-// Stream a real agent turn to a specific agent (profile). Calls onDelta per token.
-// Returns an abort function.
+export interface ToolEvent {
+  phase: "started" | "completed";
+  name: string;
+  preview: string;
+}
+
+export interface ChatHandlers {
+  onDelta: (t: string) => void;
+  onReasoning?: (text: string) => void;
+  onTool?: (t: ToolEvent) => void;
+  onDone: () => void;
+  onError: (e: string) => void;
+}
+
+// Stream a real agent turn to a specific agent (profile) via the runs API. Surfaces the agent's
+// reasoning and tool activity alongside the answer. Returns an abort function.
 export function chatStream(
   messages: ChatMessage[],
   agent: string | null,
-  handlers: { onDelta: (t: string) => void; onDone: () => void; onError: (e: string) => void },
+  handlers: ChatHandlers,
 ): () => void {
   const ctrl = new AbortController();
   (async () => {
@@ -80,8 +94,11 @@ export function chatStream(
           try {
             const obj = JSON.parse(line.slice(5).trim());
             if (obj.delta) handlers.onDelta(obj.delta);
+            else if (obj.reasoning !== undefined) handlers.onReasoning?.(obj.reasoning);
+            else if (obj.tool) handlers.onTool?.(obj.tool);
             else if (obj.error) handlers.onError(obj.error);
             else if (obj.done) handlers.onDone();
+            // obj.run / obj.approval reserved for stop-steer and approvals (next layer)
           } catch {
             /* ignore malformed frame */
           }

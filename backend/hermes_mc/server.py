@@ -219,16 +219,20 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"error": "not found"}, status=404)
 
     def _chat_stream(self, body: dict):
-        """Stream a real agent turn from the gateway to the browser as SSE."""
+        """Run a real agent turn via the runs API and relay reasoning, tool activity and the
+        answer to the browser as typed SSE frames. Falls back nowhere — runs is the path that
+        carries the agent's thinking."""
         gw = self.provider.gateway
         if not gw:
             return self._json({"error": "gateway not available on this host"}, status=503)
         messages = body.get("messages") or []
-        model = body.get("model") or "hermes-agent"
-        # resolve the agent to the right route (prefix vs the default profile's bare endpoint)
-        profile = self.provider.chat_route(body.get("agent") or None)
         if not isinstance(messages, list) or not messages:
             return self._json({"error": "messages required"}, status=400)
+        profile = self.provider.chat_route(body.get("agent") or None)
+        user_input = messages[-1].get("content", "")
+        history = messages[:-1]   # prior turns thread the conversation
+        want_reasoning = body.get("reasoning", True)
+
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-store")
@@ -239,15 +243,38 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
 
         try:
-            for chunk in gw.chat_stream(messages, model=model, profile=profile):
-                choice = (chunk.get("choices") or [{}])[0]
-                delta = (choice.get("delta") or {}).get("content") or ""
-                if delta:
-                    send({"delta": delta})
-            send({"done": True})
+            model_options = {"reasoning": {"enabled": True, "effort": "low"}} if want_reasoning else None
+            run_id = gw.submit_run(user_input, profile=profile,
+                                   conversation_history=history or None,
+                                   model_options=model_options)
+            if not run_id:
+                send({"error": "could not start run"}); return
+            send({"run": run_id})
+            for ev in gw.run_events(run_id, profile=profile):
+                t = ev.get("type") or ev.get("event") or ev.get("name") or ""
+                if t == "reasoning.available":
+                    send({"reasoning": ev.get("text", "")})
+                elif t == "message.delta":
+                    d = ev.get("delta", "")
+                    if d:
+                        send({"delta": d})
+                elif t == "tool.started":
+                    send({"tool": {"phase": "started", "name": ev.get("tool") or ev.get("name") or "",
+                                   "preview": ev.get("preview", "")}})
+                elif t == "tool.completed":
+                    send({"tool": {"phase": "completed", "name": ev.get("tool") or ev.get("name") or "",
+                                   "preview": ev.get("preview", "")}})
+                elif t == "approval.request":
+                    send({"approval": {"choices": ev.get("choices", []), "text": ev.get("preview", "")}})
+                elif t.startswith("run."):
+                    if any(s in t for s in ("completed", "failed", "interrupted", "stopping")):
+                        send({"done": True, "status": t})
+                        break
         except (BrokenPipeError, ConnectionResetError):
             return
-        except GatewayError as e:
+        except Exception as e:   # surface any failure to the client instead of a dead stream
+            import traceback
+            traceback.print_exc()
             try:
                 send({"error": str(e)})
             except Exception:

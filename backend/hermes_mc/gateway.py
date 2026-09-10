@@ -178,15 +178,38 @@ class GatewayClient:
 
     # -- runs (live telemetry & control) --------------------------------------
 
-    def run_status(self, run_id: str) -> dict:
-        return self._request("GET", f"/v1/runs/{run_id}") or {}
+    @staticmethod
+    def _p(profile: Optional[str], path: str) -> str:
+        return f"/p/{profile}{path}" if profile else path
 
-    def run_events(self, run_id: str) -> Iterator[dict]:
-        """SSE stream of a run's event trace. Yields parsed events until the stream closes."""
-        url = f"{self.base}/v1/runs/{run_id}/events"
+    def submit_run(self, user_input: str, *, profile: Optional[str] = None,
+                   conversation_history: Optional[list] = None,
+                   model_options: Optional[dict] = None) -> str:
+        """Start an agent run. Returns the run id. History threads the conversation; model_options
+        can request reasoning (``{"reasoning": {"enabled": True, "effort": "low"}}``)."""
+        body: dict = {"input": user_input, "stream": True}
+        if conversation_history:
+            body["conversation_history"] = conversation_history
+        if model_options:
+            body["model_options"] = model_options
+        data = self._request("POST", self._p(profile, "/v1/runs"), body=body, timeout=30.0) or {}
+        return data.get("run_id") or data.get("id") or ""
+
+    def run_status(self, run_id: str, *, profile: Optional[str] = None) -> dict:
+        return self._request("GET", self._p(profile, f"/v1/runs/{run_id}")) or {}
+
+    def run_events(self, run_id: str, *, profile: Optional[str] = None) -> Iterator[dict]:
+        """SSE stream of a run's event trace. Yields parsed events until the run ends."""
+        url = f"{self.base}{self._p(profile, f'/v1/runs/{run_id}/events')}"
         headers = self._headers({"Accept": "text/event-stream"})
         req = urllib.request.Request(url, headers=headers, method="GET")
-        with urllib.request.urlopen(req, timeout=300.0) as resp:
+        try:
+            resp = urllib.request.urlopen(req, timeout=300.0)
+        except urllib.error.HTTPError as e:
+            raise GatewayError(f"HTTP {e.code} on run events", status=e.code)
+        except urllib.error.URLError as e:
+            raise GatewayError(f"cannot reach run events: {e.reason}")
+        with resp:
             for line in resp:
                 line = line.decode("utf-8").strip()
                 if line.startswith("data:"):
@@ -196,8 +219,9 @@ class GatewayClient:
                     except json.JSONDecodeError:
                         continue
 
-    def run_stop(self, run_id: str) -> dict:
-        return self._request("POST", f"/v1/runs/{run_id}/stop") or {}
+    def run_stop(self, run_id: str, *, profile: Optional[str] = None) -> dict:
+        return self._request("POST", self._p(profile, f"/v1/runs/{run_id}/stop")) or {}
 
-    def run_steer(self, run_id: str, text: str) -> dict:
-        return self._request("POST", f"/v1/runs/{run_id}/steer", body={"text": text}) or {}
+    def run_steer(self, run_id: str, text: str, *, profile: Optional[str] = None) -> dict:
+        return self._request("POST", self._p(profile, f"/v1/runs/{run_id}/steer"),
+                             body={"input": text}) or {}
