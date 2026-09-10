@@ -3,6 +3,7 @@ import type { State, HealthInfo } from "./types";
 import { api, subscribeState } from "./api/client";
 import { Overview } from "./tabs/Overview";
 import { Agents } from "./tabs/Agents";
+import { Chat } from "./tabs/Chat";
 import { Tasks } from "./tabs/Tasks";
 import "./styles/app.css";
 
@@ -54,8 +55,9 @@ export function App() {
         {!state && !error && <div className="loading mono">loading live state…</div>}
         {state && tab === "Overview" && <Overview state={state} health={health} />}
         {state && tab === "Agents" && <Agents state={state} />}
+        {state && tab === "Chat" && <Chat state={state} health={health} />}
         {tab === "Tasks" && <Tasks />}
-        {state && !["Overview", "Agents", "Tasks"].includes(tab) && (
+        {state && !["Overview", "Agents", "Chat", "Tasks"].includes(tab) && (
           <div className="placeholder">
             <span className="eyebrow">{tab}</span>
             <p className="mono">This tab is next in the build. Live data is already flowing.</p>

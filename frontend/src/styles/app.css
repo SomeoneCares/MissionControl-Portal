@@ -177,3 +177,26 @@
 .task-move button { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; width: 30px; height: 26px; cursor: pointer; color: var(--ink); }
 .task-move button:hover { border-color: var(--ember); color: var(--ember); }
 .column-empty { text-align: center; color: var(--muted); font-size: 11px; padding: 24px 0; opacity: 0.6; }
+
+/* ===== chat ===== */
+.chat { display: flex; flex-direction: column; gap: 16px; }
+.chat-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.chat-title { font-size: 36px; line-height: 1; letter-spacing: -0.02em; margin: 6px 0 0; }
+.chat-sub { font-size: 13px; margin: 10px 0 0; max-width: 56ch; }
+.chat-unavailable { color: var(--ink-soft); font-size: 14px; line-height: 1.6; }
+.chat-window { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.chat-messages { display: flex; flex-direction: column; gap: 14px; padding: 20px; min-height: 340px; max-height: 56vh; overflow-y: auto; }
+.chat-empty { color: var(--muted); text-align: center; padding: 60px 0; font-size: 12px; }
+.bubble { display: flex; flex-direction: column; gap: 4px; max-width: 80%; }
+.bubble.user { align-self: flex-end; align-items: flex-end; }
+.bubble.assistant { align-self: flex-start; }
+.bubble-role { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.bubble-body { padding: 11px 14px; border-radius: 14px; font-size: 14px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+.bubble.user .bubble-body { background: var(--ink); color: var(--ground); border-bottom-right-radius: 4px; }
+.bubble.assistant .bubble-body { background: var(--panel-2); color: var(--ink); border-bottom-left-radius: 4px; }
+.caret { display: inline-block; width: 7px; height: 14px; background: var(--ember); margin-left: 2px; vertical-align: text-bottom; animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.chat-input-row { display: flex; gap: 10px; padding: 14px; border-top: 1px solid var(--line); align-items: flex-end; }
+.chat-input { flex: 1; resize: none; padding: 11px 14px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--ground); color: var(--ink); font-family: var(--font-sans); font-size: 14px; line-height: 1.4; max-height: 140px; }
+.chat-input:focus { outline: none; border-color: var(--ember); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }

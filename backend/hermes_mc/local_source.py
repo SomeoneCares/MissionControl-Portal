@@ -166,14 +166,18 @@ class LocalSource:
                     return m.group(1).strip().strip("\"'")
         except OSError:
             pass
+        # Only a real markdown heading makes a good role. Profiles whose SOUL.md opens with
+        # prompt prose (no heading) fall back to the agent name rather than showing the prompt.
         soul = self._agent_dir(agent) / "SOUL.md"
         try:
             for line in soul.read_text(encoding="utf-8").splitlines():
-                s = line.lstrip("# ").strip()
-                if s:
-                    # Drop a leading "SOUL —"/"SOUL:" document-title prefix.
-                    s = re.sub(r"^SOUL\s*[—:-]\s*", "", s, flags=re.I)
-                    return s[:80]
+                if line.lstrip().startswith("#"):
+                    s = re.sub(r"^SOUL\s*[—:-]\s*", "", line.lstrip("# ").strip(), flags=re.I)
+                    if s:
+                        return s[:80]
+                    break
+                if line.strip():
+                    break  # first content line is prose, not a heading → no usable role
         except OSError:
             pass
         return ""

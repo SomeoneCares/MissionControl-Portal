@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/main.tsx","./src/types.ts","./src/api/client.ts","./src/tabs/Agents.tsx","./src/tabs/Overview.tsx","./src/tabs/Tasks.tsx"],"version":"5.6.3"}
+{"root":["./src/App.tsx","./src/main.tsx","./src/types.ts","./src/api/client.ts","./src/tabs/Agents.tsx","./src/tabs/Chat.tsx","./src/tabs/Overview.tsx","./src/tabs/Tasks.tsx"],"version":"5.6.3"}

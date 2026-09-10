@@ -171,9 +171,44 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(self.provider.board.update(body.get("id", ""), **body))
             if path == "/api/board/delete":
                 return self._json({"deleted": self.provider.board.delete(body.get("id", ""))})
+            if path == "/api/chat":
+                return self._chat_stream(body)
         except ValueError as e:
             return self._json({"error": str(e)}, status=400)
         self._json({"error": "not found"}, status=404)
+
+    def _chat_stream(self, body: dict):
+        """Stream a real agent turn from the gateway to the browser as SSE."""
+        gw = self.provider.gateway
+        if not gw:
+            return self._json({"error": "gateway not available on this host"}, status=503)
+        messages = body.get("messages") or []
+        model = body.get("model") or "hermes-agent"
+        if not isinstance(messages, list) or not messages:
+            return self._json({"error": "messages required"}, status=400)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+        def send(obj):
+            self.wfile.write(b"data: " + json.dumps(obj).encode("utf-8") + b"\n\n")
+            self.wfile.flush()
+
+        try:
+            for chunk in gw.chat_stream(messages, model=model):
+                choice = (chunk.get("choices") or [{}])[0]
+                delta = (choice.get("delta") or {}).get("content") or ""
+                if delta:
+                    send({"delta": delta})
+            send({"done": True})
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        except GatewayError as e:
+            try:
+                send({"error": str(e)})
+            except Exception:
+                pass
 
     # -- SSE --------------------------------------------------------------
 
