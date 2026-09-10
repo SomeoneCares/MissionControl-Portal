@@ -1,0 +1,15 @@
+Bridge: remote mode across machines
+
+- bridge.py: token-authed read-only HTTP service that runs ON the Hermes
+  host and serves the exact data layer (state, schedule, content, content
+  read) plus host metrics from that machine — fails closed without a key
+- portal remote mode: DataProvider sources state/schedule/content/read from
+  the bridge; host metrics now report the Hermes box, not the portal VM
+
+Proven cross-machine: bridge on the server (192.168.100.177), portal on the
+WSL box in remote mode pointing at it. The WSL portal renders the SERVER
+fleet — 8 agents, 405 runs, 4 platforms, 21 content docs, 1 cron job — and
+the SERVER host metrics, all over the LAN with bearer auth. Chat/runs still
+need the target host :8642 gateway enabled (honest gateway-down state).
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>

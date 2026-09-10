@@ -21,7 +21,7 @@ import json
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote
 
 from . import config as config_mod
 from .agent_admin import AgentAdmin, AdminError
@@ -79,18 +79,23 @@ class DataProvider:
     def content_read(self, rel_path: str) -> dict:
         if self._local and self.cfg.content_dir:
             return self._local.content_read(self.cfg.content_dir, rel_path)
-        return {"path": rel_path, "exists": False, "content": ""}
+        data = self._bridge_get(f"/content/read?path={quote(rel_path)}")
+        return data if isinstance(data, dict) else {"path": rel_path, "exists": False, "content": ""}
 
-    def _remote_list(self, path: str, key: str) -> list:
+    def _bridge_get(self, path: str):
         import urllib.request
         try:
             req = urllib.request.Request(
                 f"{self.cfg.bridge_url}{path}",
-                headers={"Authorization": f"Bearer {self.cfg.bridge_key}"})
+                headers={"Authorization": f"Bearer {self.cfg.bridge_key}", "Accept": "application/json"})
             with urllib.request.urlopen(req, timeout=10.0) as r:
-                return json.loads(r.read().decode("utf-8")).get(key, [])
+                return json.loads(r.read().decode("utf-8"))
         except Exception:  # noqa: BLE001
-            return []
+            return None
+
+    def _remote_list(self, path: str, key: str) -> list:
+        data = self._bridge_get(path)
+        return data.get(key, []) if isinstance(data, dict) else []
 
     def stop_run(self, run_id: str, agent: str | None) -> dict:
         if not self.gateway or not run_id:
@@ -187,12 +192,15 @@ class DataProvider:
 
     def _remote_state(self) -> dict:
         """Remote mode: fetch the assembled state from the bridge on the Hermes host."""
-        import urllib.request
-        req = urllib.request.Request(
-            f"{self.cfg.bridge_url}/state",
-            headers={"Authorization": f"Bearer {self.cfg.bridge_key}", "Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=10.0) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        data = self._bridge_get("/state")
+        if not isinstance(data, dict):
+            return {"fleet": [], "health": {"gateway_state": "bridge unreachable", "platforms": {}},
+                    "vps": {"cpu_pct": 0, "mem_pct": 0, "disk_pct": 0}, "agentlogs": [],
+                    "agentlogs_stats": {"total": 0, "completed": 0, "failed": 0},
+                    "routing": {"total": 0, "models": 0, "premium_calls": 0, "fast_calls": 0, "offload_pct": 0},
+                    "models": [], "model_usage": [], "sessions": {"totals": {"input": 0, "output": 0, "messages": 0}},
+                    "working_agents": [], "generated_at": ""}
+        return data
 
     def state(self, *, force: bool = False) -> dict:
         now = time.monotonic()
