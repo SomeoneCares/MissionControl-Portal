@@ -61,6 +61,9 @@ export function Settings({ health }: { health: HealthInfo | null }) {
         </div>
       </section>
 
+      {/* access / credentials */}
+      <CredentialsBlock />
+
       {/* fleets */}
       <section className="card settings-block">
         <div className="block-head">
@@ -103,6 +106,80 @@ export function Settings({ health }: { health: HealthInfo | null }) {
         <button className="content-tool" onClick={() => { settings.set({ portalName: "", accent: "", theme: "system" }); applySettings(); }}>Reset branding</button>
       </section>
     </div>
+  );
+}
+
+function CredentialsBlock() {
+  const [status, setStatus] = useState<import("../api/client").AuthStatus | null>(null);
+  const [username, setUsername] = useState("");
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const load = () => api.authStatus().then((d) => { setStatus(d); setUsername(d.username); }).catch(() => setStatus(null));
+  useEffect(() => { load(); }, []);
+
+  const save = async () => {
+    setMsg(null); setErr(null);
+    if (!current) { setErr("Enter your current password."); return; }
+    if (next.length < 4) { setErr("New password must be at least 4 characters."); return; }
+    if (next !== confirm) { setErr("New passwords do not match."); return; }
+    setBusy(true);
+    try {
+      await api.changePassword(username.trim(), current, next);
+      setMsg("Credentials updated. Other sessions were signed out.");
+      setCurrent(""); setNext(""); setConfirm("");
+      load();
+    } catch (e) {
+      setErr(String(e).replace(/^Error:\s*/, "").replace(/ → HTTP \d+$/, "") || "Could not update credentials.");
+    }
+    setBusy(false);
+  };
+
+  if (!status || !status.required) return null;
+
+  return (
+    <section className="card settings-block">
+      <span className="eyebrow block-title">Access</span>
+      <p className="mono muted block-note">
+        The username and password used to sign in to this portal over the LAN.
+      </p>
+      {status.is_default && (
+        <p className="mono warn-text block-note">
+          You are still using the default password. Set a new one below.
+        </p>
+      )}
+      {!status.editable ? (
+        <p className="mono muted">Credentials are set by the <code>HMC_PORTAL_USER</code> / <code>HMC_PORTAL_PASSWORD</code> environment variables and can't be changed here.</p>
+      ) : (
+        <>
+          <div className="set-field">
+            <label>Username</label>
+            <input className="add-input" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} />
+          </div>
+          <div className="set-field">
+            <label>Current password</label>
+            <input className="add-input" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+          </div>
+          <div className="set-grid">
+            <div className="set-field">
+              <label>New password</label>
+              <input className="add-input" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
+            </div>
+            <div className="set-field">
+              <label>Confirm new password</label>
+              <input className="add-input" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+            </div>
+          </div>
+          {err && <p className="pane-msg mono login-error">{err}</p>}
+          {msg && <p className="pane-msg mono">{msg}</p>}
+          <button className="btn-primary" onClick={save} disabled={busy}>{busy ? "Saving…" : "Update credentials"}</button>
+        </>
+      )}
+    </section>
   );
 }
 

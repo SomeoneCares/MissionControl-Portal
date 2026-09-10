@@ -37,11 +37,22 @@ export interface FleetInfo {
   id: string; name: string; accent: string; mode: string; primary: boolean; gateway: boolean;
 }
 
+export interface AuthStatus {
+  authed: boolean;
+  required: boolean;
+  username: string;
+  is_default: boolean;   // still on the seeded default password
+  editable: boolean;     // false when credentials come from environment variables
+}
+
 export const api = {
   health: () => getJSON<HealthInfo>("/api/health"),
-  authStatus: () => getJSON<{ authed: boolean; required: boolean }>("/api/auth/status"),
-  login: (token: string) => postJSON<{ ok: boolean }>("/api/auth/login", { token }),
+  authStatus: () => getJSON<AuthStatus>("/api/auth/status"),
+  login: (username: string, password: string) =>
+    postJSON<{ ok: boolean }>("/api/auth/login", { username, password }),
   logout: () => postJSON<{ ok: boolean }>("/api/auth/logout", {}),
+  changePassword: (username: string, current_password: string, new_password: string) =>
+    postJSON<{ ok: boolean }>("/api/auth/password", { username, current_password, new_password }),
   state: () => getJSON<State>("/api/state"),
   capabilities: () => getJSON<Record<string, unknown>>("/api/capabilities"),
   toolsets: () => getJSON<{ data: { name: string }[] }>("/api/toolsets"),

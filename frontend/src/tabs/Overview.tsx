@@ -100,13 +100,16 @@ export function Overview({ state, health }: { state: State; health: HealthInfo |
                 ))}
               </ul>
               <div className="ledger-foot">
-                <div><span className="mono muted">complex</span><span className="mono tabular">{routing.premium_calls}</span></div>
-                <div><span className="mono muted">simple</span><span className="mono tabular">{routing.fast_calls}</span></div>
+                <div><span className="mono muted">cloud</span><span className="mono tabular">{routing.premium_calls}</span></div>
+                <div><span className="mono muted">local</span><span className="mono tabular">{routing.fast_calls}</span></div>
                 <div><span className="mono muted">offload</span><span className="mono tabular">{routing.offload_pct}%</span></div>
                 <div><span className="mono muted">tokens</span><span className="mono tabular">{tokens > 0 ? compact(tokens) : "—"}</span></div>
               </div>
-              {routing.offload_pct === 0 && routing.total > 0 && (
-                <p className="mono warn-text note">Every run went to the premium model — complexity routing is not offloading.</p>
+              {routing.offload_pct === 0 && routing.premium_calls > 0 && (
+                <p className="mono warn-text note">All inference ran on cloud models — nothing is offloaded to local hardware.</p>
+              )}
+              {routing.offload_pct >= 80 && (
+                <p className="mono note ok-text">{routing.offload_pct}% of inference stayed on local hardware.</p>
               )}
             </>
           )}

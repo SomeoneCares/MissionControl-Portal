@@ -14,6 +14,7 @@ gateway key, all from the environment and disk. Secrets are read but never logge
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import secrets
@@ -47,22 +48,79 @@ def write_portal_settings(project_dir: Path, patch: dict) -> dict:
     return current
 
 
-def resolve_portal_token(project_dir: Path) -> str:
-    """The portal's access token — HMC_PORTAL_TOKEN if set, else a stable one generated once
-    and persisted in the project dir so LAN clients authenticate with a real credential."""
-    env = os.environ.get("HMC_PORTAL_TOKEN", "").strip()
-    if env:
-        return env
+# The portal signs in with a username + password. Credentials live in portal-settings.json as a
+# username and a salted PBKDF2 hash (never plaintext). A fresh install seeds a known default so
+# the user can sign in immediately, then change both in Settings.
+DEFAULT_USERNAME = "admin"
+DEFAULT_PASSWORD = "admin"
+_PBKDF2_ITERS = 200_000
+
+
+def hash_password(password: str, salt: Optional[bytes] = None) -> str:
+    """Salted PBKDF2-SHA256 hash, encoded as ``pbkdf2$<iters>$<salt hex>$<hash hex>``."""
+    salt = salt or secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", (password or "").encode("utf-8"), salt, _PBKDF2_ITERS)
+    return f"pbkdf2${_PBKDF2_ITERS}${salt.hex()}${dk.hex()}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    """Constant-time check of a password against a stored ``pbkdf2$…`` hash."""
+    try:
+        algo, iters, salthex, want = stored.split("$")
+        if algo != "pbkdf2":
+            return False
+        dk = hashlib.pbkdf2_hmac("sha256", (password or "").encode("utf-8"),
+                                 bytes.fromhex(salthex), int(iters))
+        return secrets.compare_digest(dk.hex(), want)
+    except (ValueError, AttributeError):
+        return False
+
+
+@dataclass
+class PortalAuth:
+    username: str
+    pw_hash: str = field(repr=False, default="")
+    is_default: bool = False   # still on the seeded default password → prompt the user to change it
+    from_env: bool = False     # set via HMC_PORTAL_USER/PASSWORD → not editable in the UI
+
+
+def resolve_portal_auth(project_dir: Path) -> PortalAuth:
+    """Resolve the portal's sign-in credentials.
+
+    ``HMC_PORTAL_USER`` + ``HMC_PORTAL_PASSWORD`` (both set) override everything and are not
+    editable in the UI. Otherwise credentials come from portal-settings.json; a fresh install is
+    seeded with the documented default (``admin`` / ``admin``) and flagged so the UI can warn.
+    """
+    env_user = os.environ.get("HMC_PORTAL_USER", "").strip()
+    env_pw = os.environ.get("HMC_PORTAL_PASSWORD", "").strip()
+    if env_user and env_pw:
+        return PortalAuth(username=env_user, pw_hash=hash_password(env_pw), from_env=True)
+
     settings = read_portal_settings(project_dir)
-    tok = str(settings.get("auth_token") or "").strip()
-    if not tok:
-        tok = secrets.token_urlsafe(24)
-        write_portal_settings(project_dir, {"auth_token": tok})
+    user = str(settings.get("auth_user") or "").strip()
+    pw_hash = str(settings.get("auth_pw") or "").strip()
+    if not user or not pw_hash:
+        user = user or DEFAULT_USERNAME
+        pw_hash = hash_password(DEFAULT_PASSWORD)
+        write_portal_settings(project_dir, {"auth_user": user, "auth_pw": pw_hash, "auth_default_pw": True})
         try:
-            portal_settings_file(project_dir).chmod(0o600)  # token file readable by owner only
+            portal_settings_file(project_dir).chmod(0o600)  # credentials file: owner-only
         except OSError:
             pass
-    return tok
+        return PortalAuth(username=user, pw_hash=pw_hash, is_default=True)
+    return PortalAuth(username=user, pw_hash=pw_hash, is_default=bool(settings.get("auth_default_pw")))
+
+
+def set_portal_credentials(project_dir: Path, username: str, new_password: str) -> PortalAuth:
+    """Persist a new username/password and return the fresh :class:`PortalAuth`."""
+    username = (username or "").strip() or DEFAULT_USERNAME
+    pw_hash = hash_password(new_password)
+    write_portal_settings(project_dir, {"auth_user": username, "auth_pw": pw_hash, "auth_default_pw": False})
+    try:
+        portal_settings_file(project_dir).chmod(0o600)
+    except OSError:
+        pass
+    return PortalAuth(username=username, pw_hash=pw_hash, is_default=False)
 
 
 def _read_env_file(path: Path) -> dict[str, str]:
@@ -100,7 +158,7 @@ class Config:
     bridge_key: str = field(repr=False, default="")
     host: str = "0.0.0.0"           # portal bind address
     port: int = 51770               # portal bind port
-    portal_token: str = field(repr=False, default="")  # bearer/session token for portal access
+    auth: Optional["PortalAuth"] = field(repr=False, default=None)  # sign-in credentials
 
     @property
     def is_local(self) -> bool:
@@ -166,7 +224,7 @@ def load(env: Optional[dict] = None) -> Config:
                        else (home / "kanban.db")),
             host=getenv("HMC_HOST") or "0.0.0.0",
             port=int(getenv("HMC_PORT") or "51770"),
-            portal_token=resolve_portal_token(project_dir),
+            auth=resolve_portal_auth(project_dir),
         )
 
     # remote
@@ -181,5 +239,5 @@ def load(env: Optional[dict] = None) -> Config:
         bridge_key=getenv("HMC_BRIDGE_KEY"),
         host=getenv("HMC_HOST") or "0.0.0.0",
         port=int(getenv("HMC_PORT") or "51770"),
-        portal_token=resolve_portal_token(project_dir),
+        auth=resolve_portal_auth(project_dir),
     )

@@ -17,7 +17,7 @@ handlers never care which mode they run in.
 """
 from __future__ import annotations
 
-import hmac
+import base64
 import json
 import os
 import secrets
@@ -317,7 +317,8 @@ class Handler(BaseHTTPRequestHandler):
     provider: DataProvider = None   # per-request, resolved from the selected fleet
     registry: FleetRegistry = None
     dist_dir: Path = None
-    auth_token: str = ""            # the portal access token (from cfg.portal_token)
+    auth: "config_mod.PortalAuth" = None   # sign-in credentials (from cfg.auth)
+    project_dir: Path = None               # where credential changes are persisted
 
     server_version = "HermesMC/0.1"
 
@@ -334,16 +335,28 @@ class Handler(BaseHTTPRequestHandler):
         except (AttributeError, Exception):
             return ""
 
+    def _check_credentials(self, username: str, password: str) -> bool:
+        a = self.auth
+        if not a:
+            return False
+        return (secrets.compare_digest((username or ""), a.username)
+                and config_mod.verify_password(password or "", a.pw_hash))
+
     def _authed(self) -> bool:
-        if not self.auth_token:
-            return True  # auth disabled (no token) — never happens in normal runs
+        if not self.auth:
+            return True  # auth disabled — never happens in normal runs
         sid = self._session_id()
         if sid and sid in _AUTH_SESSIONS:
             return True
-        # also accept a raw bearer token, for scripts/CLI clients
-        bearer = (self.headers.get("Authorization") or "")[7:] \
-            if (self.headers.get("Authorization") or "").lower().startswith("bearer ") else ""
-        return bool(bearer) and hmac.compare_digest(bearer, self.auth_token)
+        # also accept HTTP Basic (username:password), for scripts/CLI clients
+        head = self.headers.get("Authorization") or ""
+        if head.lower().startswith("basic "):
+            try:
+                user, _, pw = base64.b64decode(head[6:]).decode("utf-8").partition(":")
+                return self._check_credentials(user, pw)
+            except (ValueError, UnicodeDecodeError):
+                return False
+        return False
 
     def _needs_auth(self, path: str) -> bool:
         if path in _OPEN_PATHS:
@@ -357,10 +370,7 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return True
 
-    def _handle_login(self, body: dict):
-        token = str(body.get("token") or "")
-        if not self.auth_token or not hmac.compare_digest(token, self.auth_token):
-            return self._json({"ok": False, "error": "invalid token"}, status=401)
+    def _set_session_cookie(self):
         sid = secrets.token_urlsafe(24)
         _AUTH_SESSIONS.add(sid)
         payload = json.dumps({"ok": True}).encode("utf-8")
@@ -373,6 +383,32 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(payload)
+
+    def _handle_login(self, body: dict):
+        username = str(body.get("username") or "")
+        password = str(body.get("password") or "")
+        if not self._check_credentials(username, password):
+            return self._json({"ok": False, "error": "invalid username or password"}, status=401)
+        self._set_session_cookie()
+
+    def _handle_password_change(self, body: dict):
+        """Change the username/password. Requires a valid session and the current password."""
+        if not self._authed():
+            return self._json({"ok": False, "error": "not signed in"}, status=401)
+        if self.auth and self.auth.from_env:
+            return self._json({"ok": False, "error": "credentials are set by environment variables and cannot be changed here"}, status=400)
+        current = str(body.get("current_password") or "")
+        new_pw = str(body.get("new_password") or "")
+        new_user = str(body.get("username") or (self.auth.username if self.auth else ""))
+        if not config_mod.verify_password(current, self.auth.pw_hash if self.auth else ""):
+            return self._json({"ok": False, "error": "current password is incorrect"}, status=401)
+        if len(new_pw) < 4:
+            return self._json({"ok": False, "error": "new password must be at least 4 characters"}, status=400)
+        new_auth = config_mod.set_portal_credentials(self.project_dir, new_user, new_pw)
+        Handler.auth = new_auth  # apply to every subsequent request
+        # invalidate all other sessions, then hand this browser a fresh one
+        _AUTH_SESSIONS.clear()
+        self._set_session_cookie()
 
     def _handle_logout(self):
         _AUTH_SESSIONS.discard(self._session_id())
@@ -422,7 +458,13 @@ class Handler(BaseHTTPRequestHandler):
         if not self._gate(path):
             return
         if path == "/api/auth/status":
-            return self._json({"authed": self._authed(), "required": bool(self.auth_token)})
+            return self._json({
+                "authed": self._authed(),
+                "required": bool(self.auth),
+                "username": self.auth.username if self.auth else "",
+                "is_default": bool(self.auth and self.auth.is_default),
+                "editable": bool(self.auth and not self.auth.from_env),
+            })
         if self.registry is not None:
             self.provider = self.registry.provider(self._fleet_id())
         if path == "/api/fleets":
@@ -507,6 +549,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._handle_login(body)
         if path == "/api/auth/logout":
             return self._handle_logout()
+        if path == "/api/auth/password":
+            return self._handle_password_change(body)
         if self.registry is not None:
             self.provider = self.registry.provider(self._fleet_id())
         if path == "/api/fleets":
@@ -776,7 +820,8 @@ def make_server(cfg: config_mod.Config) -> ThreadingHTTPServer:
     Handler.registry = registry
     Handler.provider = registry.provider("primary")
     Handler.dist_dir = dist
-    Handler.auth_token = cfg.portal_token
+    Handler.auth = cfg.auth
+    Handler.project_dir = cfg.project_dir
     httpd = ThreadingHTTPServer((cfg.host, cfg.port), Handler)
     return httpd
 
@@ -785,10 +830,11 @@ def main():
     cfg = config_mod.load()
     httpd = make_server(cfg)
     print(f"Hermes Mission Control — mode={cfg.mode} — http://{cfg.host}:{cfg.port}")
-    if cfg.portal_token:
-        print("  access token (needed to sign in over the LAN): " + cfg.portal_token)
-        print("  it is stored in " + str(config_mod.portal_settings_file(cfg.project_dir))
-              + " — rotate by deleting 'auth_token' there or setting HMC_PORTAL_TOKEN")
+    if cfg.auth:
+        print(f"  sign in with username '{cfg.auth.username}'"
+              + (" (password set by HMC_PORTAL_PASSWORD)" if cfg.auth.from_env else ""))
+        if cfg.auth.is_default:
+            print("  default password is 'admin' — change it in Settings after signing in")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

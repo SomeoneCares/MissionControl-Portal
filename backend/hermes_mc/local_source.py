@@ -48,6 +48,40 @@ _CONTENT_TEXT_EXTS = {".md", ".txt", ".html", ".htm", ".csv", ".json", ".log"}
 _CONTENT_EXTS = _CONTENT_TEXT_EXTS | {".pdf", ".docx"}
 
 
+def _is_cloud_model(name: str) -> bool:
+    """True if a model id names a hosted/cloud provider rather than a local one.
+
+    Hermes addresses cloud models as ``provider/model`` (e.g. ``stepfun/step-3.7-flash:free``,
+    ``openrouter/…``, ``anthropic/…``); local Ollama models are bare tags (``soc-oss:latest``).
+    The ``provider/`` prefix is the reliable signal for "ran off-box on a paid/hosted endpoint".
+    """
+    n = (name or "").strip()
+    if not n:
+        return False
+    head = n.split("/", 1)[0].lower() if "/" in n else ""
+    # a bare "ollama" prefix is still local; everything else with a slash is a hosted provider
+    return bool(head) and head != "ollama"
+
+
+def _routing_split(total: int, model_usage: list[dict]) -> dict:
+    """Split real inference between local (offloaded) and cloud (premium) models.
+
+    ``premium_calls`` = API calls served by hosted/cloud models; ``fast_calls`` = calls served
+    by local models; ``offload_pct`` = share kept on local hardware. Counts come from the model
+    ledger (per-model API calls), so the figure reflects actual inference, not run count.
+    """
+    cloud = sum(int(u.get("count") or 0) for u in model_usage if _is_cloud_model(u.get("name", "")))
+    local = sum(int(u.get("count") or 0) for u in model_usage if not _is_cloud_model(u.get("name", "")))
+    calls = cloud + local
+    return {
+        "total": total,
+        "models": len(model_usage),
+        "premium_calls": cloud,
+        "fast_calls": local,
+        "offload_pct": round(local / calls * 100) if calls else 0,
+    }
+
+
 def _epoch_iso(v) -> str:
     """Hermes stores timestamps as epoch floats; normalise to ISO. Pass strings through."""
     if v is None:
@@ -568,14 +602,7 @@ class LocalSource:
             "fleet": fleet,
             "models": [{"id": m, "label": m} for m in model_names],
             "model_usage": model_usage,
-            "routing": {
-                "total": total,
-                "models": len(model_usage),
-                # premium/fast split needs a routing map; report honestly until wired.
-                "premium_calls": total,
-                "fast_calls": 0,
-                "offload_pct": 0,
-            },
+            "routing": _routing_split(total, model_usage),
             "agentlogs": recent,
             "agentlogs_stats": {"total": total, "completed": completed_total, "failed": failed_total},
             "health": self.health(),
