@@ -23,6 +23,7 @@ export const api = {
   health: () => getJSON<HealthInfo>("/api/health"),
   state: () => getJSON<State>("/api/state"),
   capabilities: () => getJSON<Record<string, unknown>>("/api/capabilities"),
+  chatAgents: () => getJSON<ChatAgents>("/api/chat/agents"),
   board: {
     list: () => getJSON<{ tasks: BoardTask[] }>("/api/board"),
     create: (t: { title: string; priority?: string; status?: string }) =>
@@ -38,10 +39,17 @@ export interface ChatMessage {
   content: string;
 }
 
-// Stream a real agent turn. Calls onDelta per token, onDone at the end, onError on failure.
+export interface ChatAgents {
+  gateway: boolean;
+  multiplex: boolean;
+  agents: string[];
+}
+
+// Stream a real agent turn to a specific agent (profile). Calls onDelta per token.
 // Returns an abort function.
 export function chatStream(
   messages: ChatMessage[],
+  agent: string | null,
   handlers: { onDelta: (t: string) => void; onDone: () => void; onError: (e: string) => void },
 ): () => void {
   const ctrl = new AbortController();
@@ -50,7 +58,7 @@ export function chatStream(
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages }),
+        body: JSON.stringify({ messages, agent }),
         signal: ctrl.signal,
       });
       if (!res.ok || !res.body) {

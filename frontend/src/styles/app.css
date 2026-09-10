@@ -200,3 +200,18 @@
 .chat-input { flex: 1; resize: none; padding: 11px 14px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--ground); color: var(--ink); font-family: var(--font-sans); font-size: 14px; line-height: 1.4; max-height: 140px; }
 .chat-input:focus { outline: none; border-color: var(--ember); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ===== chat roster layout ===== */
+.chat-layout { display: grid; grid-template-columns: 260px 1fr; gap: 16px; align-items: start; }
+@media (max-width: 780px) { .chat-layout { grid-template-columns: 1fr; } }
+.chat-roster { padding: 14px; }
+.roster-title { display: block; margin-bottom: 10px; }
+.chat-roster ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.roster-item { width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: var(--radius); border: 1px solid transparent; background: transparent; cursor: pointer; text-align: left; transition: all 0.12s; position: relative; }
+.roster-item:hover { border-color: var(--line); }
+.roster-item.active { background: var(--panel-2); border-color: var(--ember); }
+.roster-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.roster-name { font-size: 13px; font-weight: 500; color: var(--ink); }
+.roster-sub { font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+.roster-busy { width: 7px; height: 7px; border-radius: 50%; background: var(--ember); animation: blink 1s steps(2) infinite; flex: none; }
+.roster-note { font-size: 10px; color: var(--muted); margin: 12px 4px 0; line-height: 1.5; }

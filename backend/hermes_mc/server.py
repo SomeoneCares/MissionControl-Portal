@@ -44,6 +44,7 @@ class DataProvider:
             if cfg.is_local else None
         )
         self._cache: dict = {"at": 0.0, "data": None}
+        self._chat_routes: dict | None = None   # cached per-agent route resolution
 
     def capabilities(self) -> dict:
         if not self.gateway:
@@ -68,6 +69,44 @@ class DataProvider:
             return self.gateway.skills()
         except GatewayError:
             return []
+
+    def _ensure_chat_routes(self) -> dict:
+        """Resolve, once, how to reach each agent: 'prefix' (served at /p/<agent>/ under
+        multiplexing) or 'home' (the gateway's default profile, reached at bare /v1/). Any
+        'prefix' hit means multiplexing is on."""
+        if self._chat_routes is not None:
+            return self._chat_routes
+        routes: dict[str, str] = {}
+        multiplex = False
+        if self.gateway:
+            for a in (x["agent"] for x in self.state().get("fleet", [])):
+                if self.gateway.profile_reachable(a):
+                    routes[a] = "prefix"
+                    multiplex = True
+                else:
+                    routes[a] = "home"   # not served under /p/ → the default profile (bare /v1/)
+        self._chat_routes = {"multiplex": multiplex, "routes": routes}
+        return self._chat_routes
+
+    def chat_route(self, agent: str | None) -> str | None:
+        """The profile arg for the gateway client: the agent name when it is served under a
+        prefix, otherwise None (bare /v1/ — the default profile)."""
+        if not agent:
+            return None
+        routes = self._ensure_chat_routes()["routes"]
+        return agent if routes.get(agent) == "prefix" else None
+
+    def chat_agents(self) -> dict:
+        """Which agents can be chatted with. Multiplexing on → every fleet profile is
+        addressable; off → only the gateway's single default profile."""
+        if not self.gateway:
+            return {"gateway": False, "multiplex": False, "agents": []}
+        info = self._ensure_chat_routes()
+        return {
+            "gateway": True,
+            "multiplex": info["multiplex"],
+            "agents": [a["agent"] for a in self.state().get("fleet", [])],
+        }
 
     def _build(self) -> dict:
         if self._local is not None:
@@ -151,6 +190,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"data": self.provider.toolsets()})
         if path == "/api/skills":
             return self._json({"data": self.provider.skills()})
+        if path == "/api/chat/agents":
+            return self._json(self.provider.chat_agents())
         if path == "/api/state":
             return self._json(self.provider.state())
         if path == "/api/board":
@@ -184,6 +225,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "gateway not available on this host"}, status=503)
         messages = body.get("messages") or []
         model = body.get("model") or "hermes-agent"
+        # resolve the agent to the right route (prefix vs the default profile's bare endpoint)
+        profile = self.provider.chat_route(body.get("agent") or None)
         if not isinstance(messages, list) or not messages:
             return self._json({"error": "messages required"}, status=400)
         self.send_response(200)
@@ -196,7 +239,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
 
         try:
-            for chunk in gw.chat_stream(messages, model=model):
+            for chunk in gw.chat_stream(messages, model=model, profile=profile):
                 choice = (chunk.get("choices") or [{}])[0]
                 delta = (choice.get("delta") or {}).get("content") or ""
                 if delta:

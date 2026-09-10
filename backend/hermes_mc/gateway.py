@@ -118,24 +118,40 @@ class GatewayClient:
         data = self._request("GET", "/v1/skills") or {}
         return list(data.get("data", []))
 
+    def profile_reachable(self, profile: str) -> bool:
+        """True if the gateway serves ``profile`` at its multiplex prefix (i.e. multiplexing is
+        on and this profile is in the served set). A single-profile gateway returns 404 here."""
+        try:
+            req = urllib.request.Request(
+                f"{self.base}/p/{profile}/v1/models", headers=self._headers())
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                return resp.status == 200
+        except Exception:  # noqa: BLE001 — any failure means not reachable
+            return False
+
     def toolsets(self) -> list[dict]:
         data = self._request("GET", "/v1/toolsets") or {}
         return list(data.get("data", []))
 
     # -- chat ------------------------------------------------------------------
 
+    @staticmethod
+    def _chat_path(profile: Optional[str]) -> str:
+        """Route to a specific profile via the multiplex prefix, or the default profile."""
+        return f"/p/{profile}/v1/chat/completions" if profile else "/v1/chat/completions"
+
     def chat(self, messages: list[dict], *, model: str = "hermes-agent",
-             temperature: float = 0.7) -> dict:
+             temperature: float = 0.7, profile: Optional[str] = None) -> dict:
         """Non-streaming chat completion. Returns the parsed OpenAI-shaped response."""
-        return self._request("POST", "/v1/chat/completions", body={
+        return self._request("POST", self._chat_path(profile), body={
             "model": model, "messages": messages,
             "temperature": temperature, "stream": False,
         }, timeout=120.0)
 
     def chat_stream(self, messages: list[dict], *, model: str = "hermes-agent",
-                    temperature: float = 0.7) -> Iterator[dict]:
+                    temperature: float = 0.7, profile: Optional[str] = None) -> Iterator[dict]:
         """Streaming chat completion. Yields parsed SSE ``data:`` chunks until ``[DONE]``."""
-        url = f"{self.base}/v1/chat/completions"
+        url = f"{self.base}{self._chat_path(profile)}"
         payload = json.dumps({
             "model": model, "messages": messages,
             "temperature": temperature, "stream": True,
