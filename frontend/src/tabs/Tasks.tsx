@@ -62,7 +62,7 @@ export function Tasks() {
       {err && <div className="banner danger">Can't load tasks — {err}</div>}
       {msg && <div className={`task-toast mono ${msg.ok ? "ok" : "bad"}`}>{msg.text}</div>}
 
-      <section className="board board-wide" style={{ gridTemplateColumns: `repeat(${Math.max(1, stages.length)}, minmax(190px, 1fr))` }}>
+      <section className="board board-wide" style={{ gridTemplateColumns: `repeat(${Math.max(1, stages.length)}, minmax(148px, 1fr))` }}>
         {stages.map((col) => {
           const items = byStage(col.key);
           return (

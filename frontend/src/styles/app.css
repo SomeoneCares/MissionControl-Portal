@@ -176,7 +176,10 @@
 .task-move { display: flex; gap: 6px; margin-top: 10px; }
 
 /* live fleet board (Hermes kanban) */
-.board-wide { display: grid; gap: 14px; overflow-x: auto; padding-bottom: 6px; }
+.board-wide { display: grid; gap: 10px; overflow-x: auto; align-items: start; padding-bottom: 6px; }
+.board-wide .column { min-height: 150px; padding: 10px; }
+.board-wide .task-card { padding: 10px; }
+.board-wide .column-empty { padding: 18px 0; text-align: center; }
 .status-chip { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 7px; border-radius: 999px; background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); }
 .status-chip.st-running { background: var(--ok-bg); color: var(--ok); border-color: var(--ok); }
 .status-chip.st-review { background: var(--warn-bg); color: var(--warn); border-color: var(--warn); }
