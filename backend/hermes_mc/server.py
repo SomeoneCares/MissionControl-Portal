@@ -21,9 +21,10 @@ import json
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 from . import config as config_mod
+from .agent_admin import AgentAdmin, AdminError
 from .board import Board
 from .gateway import GatewayClient, GatewayError
 from .local_source import LocalSource
@@ -43,6 +44,8 @@ class DataProvider:
             LocalSource(cfg.hermes_home, cfg.project_dir, cfg.agent_logs_db)
             if cfg.is_local else None
         )
+        # admin (model + file editing) is local-mode only; the gateway API is read-only for config
+        self.admin = AgentAdmin(cfg.hermes_home) if cfg.is_local else None
         self._cache: dict = {"at": 0.0, "data": None}
         self._chat_routes: dict | None = None   # cached per-agent route resolution
 
@@ -192,6 +195,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"data": self.provider.skills()})
         if path == "/api/chat/agents":
             return self._json(self.provider.chat_agents())
+        if path == "/api/models":
+            if not self.provider.admin:
+                return self._json({"models": [], "editable": False})
+            return self._json({"models": self.provider.admin.list_models(), "editable": True})
+        if path == "/api/agents/files":
+            return self._admin_read(lambda a: {"files": self.provider.admin.list_files(a)})
+        if path == "/api/agents/file":
+            qs = parse_qs(urlparse(self.path).query)
+            name = (qs.get("name") or [""])[0]
+            return self._admin_read(lambda a: self.provider.admin.read_file(a, name))
         if path == "/api/state":
             return self._json(self.provider.state())
         if path == "/api/board":
@@ -214,9 +227,34 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"deleted": self.provider.board.delete(body.get("id", ""))})
             if path == "/api/chat":
                 return self._chat_stream(body)
+            if path == "/api/agents/model":
+                return self._admin_write(lambda: self.provider.admin.set_model(
+                    body.get("agent", ""), body.get("model", ""), body.get("provider", "")))
+            if path == "/api/agents/file":
+                return self._admin_write(lambda: self.provider.admin.save_file(
+                    body.get("agent", ""), body.get("name", ""), body.get("content", "")))
         except ValueError as e:
             return self._json({"error": str(e)}, status=400)
         self._json({"error": "not found"}, status=404)
+
+    # -- admin helpers ----------------------------------------------------
+
+    def _admin_read(self, fn):
+        if not self.provider.admin:
+            return self._json({"error": "editing is available in local mode only"}, status=403)
+        agent = parse_qs(urlparse(self.path).query).get("agent", [""])[0]
+        try:
+            return self._json(fn(agent))
+        except AdminError as e:
+            return self._json({"error": str(e)}, status=400)
+
+    def _admin_write(self, fn):
+        if not self.provider.admin:
+            return self._json({"error": "editing is available in local mode only"}, status=403)
+        try:
+            return self._json(fn())
+        except AdminError as e:
+            return self._json({"error": str(e)}, status=400)
 
     def _chat_stream(self, body: dict):
         """Run a real agent turn via the runs API and relay reasoning, tool activity and the

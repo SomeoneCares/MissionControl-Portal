@@ -24,6 +24,18 @@ export const api = {
   state: () => getJSON<State>("/api/state"),
   capabilities: () => getJSON<Record<string, unknown>>("/api/capabilities"),
   chatAgents: () => getJSON<ChatAgents>("/api/chat/agents"),
+  models: () => getJSON<{ models: ModelOption[]; editable: boolean }>("/api/models"),
+  agentFiles: (agent: string) =>
+    getJSON<{ files: AgentFile[] }>(`/api/agents/files?agent=${encodeURIComponent(agent)}`),
+  agentFile: (agent: string, name: string) =>
+    getJSON<{ name: string; exists: boolean; content: string; redacted?: boolean }>(
+      `/api/agents/file?agent=${encodeURIComponent(agent)}&name=${encodeURIComponent(name)}`),
+  setModel: (agent: string, model: string, provider = "") =>
+    postJSON<{ ok: boolean; model: string; backup: string | null }>(
+      "/api/agents/model", { agent, model, provider }),
+  saveFile: (agent: string, name: string, content: string) =>
+    postJSON<{ ok: boolean; size: number; backup: string | null }>(
+      "/api/agents/file", { agent, name, content }),
   board: {
     list: () => getJSON<{ tasks: BoardTask[] }>("/api/board"),
     create: (t: { title: string; priority?: string; status?: string }) =>
@@ -43,6 +55,20 @@ export interface ChatAgents {
   gateway: boolean;
   multiplex: boolean;
   agents: string[];
+}
+
+export interface ModelOption {
+  id: string;
+  model: string;
+  provider: string;
+  label: string;
+  source: string;
+}
+
+export interface AgentFile {
+  name: string;
+  exists: boolean;
+  size: number;
 }
 
 export interface ToolEvent {

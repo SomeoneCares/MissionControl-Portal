@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { State, Agent } from "../types";
+import { api, type ModelOption, type AgentFile } from "../api/client";
 
 // Agents — one card per agent the server reports, any number. Detail drawer on click.
 // Fleet capabilities (toolsets) come from the gateway; per-agent vitals from /api/state.
@@ -80,7 +81,10 @@ export function Agents({ state }: { state: State }) {
   );
 }
 
+type DrawerTab = "profile" | "model" | "files";
+
 function AgentDrawer({ agent, onClose }: { agent: Agent; onClose: () => void }) {
+  const [tab, setTab] = useState<DrawerTab>("profile");
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
@@ -98,30 +102,192 @@ function AgentDrawer({ agent, onClose }: { agent: Agent; onClose: () => void }) 
           </div>
           <button className="drawer-x" onClick={onClose} aria-label="Close">✕</button>
         </div>
-        <div className="drawer-stats">
-          <div className="card mini">
-            <span className="eyebrow">Runs today</span>
-            <div className="display mini-num tabular">{agent.tasksToday}</div>
-          </div>
-          <div className="card mini">
-            <span className="eyebrow">Success</span>
-            <div className="display mini-num tabular ember">{agent.success}%</div>
-          </div>
+
+        <div className="drawer-tabs">
+          {(["profile", "model", "files"] as DrawerTab[]).map((t) => (
+            <button key={t} className={`drawer-tab ${t === tab ? "active" : ""}`} onClick={() => setTab(t)}>
+              {t}
+            </button>
+          ))}
         </div>
-        <dl className="drawer-fields">
-          <div><dt>Profile</dt><dd className="mono">{agent.agent}</dd></div>
-          <div><dt>Model</dt><dd className="mono">{agent.defaultModel || "—"}</dd></div>
-          <div><dt>Provider</dt><dd className="mono">{agent.provider || "—"}</dd></div>
-          <div><dt>Workload share</dt><dd className="mono">{agent.share}%</dd></div>
-          <div><dt>State</dt><dd className="mono">{agent.state}</dd></div>
-        </dl>
-        {agent.task && (
-          <div className="drawer-task">
-            <span className="eyebrow">Last task</span>
-            <p>{agent.task}</p>
-          </div>
-        )}
+
+        {tab === "profile" && <ProfilePane agent={agent} />}
+        {tab === "model" && <ModelPane agent={agent} />}
+        {tab === "files" && <FilesPane agent={agent} />}
       </aside>
+    </div>
+  );
+}
+
+function ProfilePane({ agent }: { agent: Agent }) {
+  return (
+    <>
+      <div className="drawer-stats">
+        <div className="card mini">
+          <span className="eyebrow">Runs today</span>
+          <div className="display mini-num tabular">{agent.tasksToday}</div>
+        </div>
+        <div className="card mini">
+          <span className="eyebrow">Success</span>
+          <div className="display mini-num tabular ember">{agent.success}%</div>
+        </div>
+      </div>
+      <dl className="drawer-fields">
+        <div><dt>Profile</dt><dd className="mono">{agent.agent}</dd></div>
+        <div><dt>Model</dt><dd className="mono">{agent.defaultModel || "—"}</dd></div>
+        <div><dt>Provider</dt><dd className="mono">{agent.provider || "—"}</dd></div>
+        <div><dt>Workload share</dt><dd className="mono">{agent.share}%</dd></div>
+        <div><dt>State</dt><dd className="mono">{agent.state}</dd></div>
+      </dl>
+      {agent.task && (
+        <div className="drawer-task">
+          <span className="eyebrow">Last task</span>
+          <p>{agent.task}</p>
+        </div>
+      )}
+    </>
+  );
+}
+
+function ModelPane({ agent }: { agent: Agent }) {
+  const [models, setModels] = useState<ModelOption[] | null>(null);
+  const [choice, setChoice] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [current, setCurrent] = useState(agent.defaultModel);
+
+  useEffect(() => {
+    api.models().then((d) => {
+      setModels(d.editable ? d.models : []);
+      if (!d.editable) setMsg("Model editing is available in local mode only.");
+    }).catch(() => setModels([]));
+  }, []);
+
+  const save = async () => {
+    if (!choice) return;
+    setSaving(true); setMsg(null);
+    try {
+      const r = await api.setModel(agent.agent, choice);
+      setCurrent(r.model);
+      setMsg(`Model set to ${r.model}${r.backup ? " (previous config backed up)" : ""}. Takes effect on the agent's next turn.`);
+    } catch (e) {
+      setMsg(String(e));
+    }
+    setSaving(false);
+  };
+
+  const byProvider: Record<string, ModelOption[]> = {};
+  (models ?? []).forEach((m) => { (byProvider[m.provider || "other"] ??= []).push(m); });
+
+  return (
+    <div className="pane">
+      <div className="pane-row">
+        <span className="eyebrow">Current model</span>
+        <span className="mono current-model">{current || "unset"}</span>
+      </div>
+      {models === null ? (
+        <p className="mono muted pane-loading">loading models…</p>
+      ) : models.length === 0 ? (
+        <p className="mono muted">{msg || "No models available."}</p>
+      ) : (
+        <>
+          <label className="pane-label">Change to</label>
+          <select className="model-select mono" value={choice} onChange={(e) => setChoice(e.target.value)}>
+            <option value="">select a model…</option>
+            {Object.entries(byProvider).map(([prov, list]) => (
+              <optgroup key={prov} label={prov}>
+                {list.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label} {m.source === "live" ? "· live" : ""}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <button className="btn-primary pane-save" onClick={save} disabled={!choice || saving}>
+            {saving ? "Setting…" : "Set model"}
+          </button>
+          <p className="mono muted pane-count">{models.length} models enabled on this host</p>
+        </>
+      )}
+      {msg && <p className="pane-msg mono">{msg}</p>}
+    </div>
+  );
+}
+
+function FilesPane({ agent }: { agent: Agent }) {
+  const [files, setFiles] = useState<AgentFile[] | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const [content, setContent] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => { api.agentFiles(agent.agent).then((d) => setFiles(d.files)).catch(() => setFiles([])); }, [agent.agent]);
+
+  const openFile = async (name: string) => {
+    setOpen(name); setMsg(null); setDirty(false); setContent("");
+    try {
+      const d = await api.agentFile(agent.agent, name);
+      setContent(d.content);
+      if (d.redacted) setMsg("Secrets in this file are shown as [REDACTED] and cannot be saved.");
+    } catch (e) { setMsg(String(e)); }
+  };
+
+  const save = async () => {
+    if (!open) return;
+    setSaving(true); setMsg(null);
+    try {
+      const r = await api.saveFile(agent.agent, open, content);
+      setDirty(false);
+      setMsg(`Saved ${open}${r.backup ? " (previous version backed up)" : ""}.`);
+      api.agentFiles(agent.agent).then((d) => setFiles(d.files));
+    } catch (e) { setMsg(String(e)); }
+    setSaving(false);
+  };
+
+  if (open) {
+    return (
+      <div className="pane">
+        <div className="file-editor-head">
+          <button className="file-back mono" onClick={() => setOpen(null)}>← files</button>
+          <span className="mono file-open-name">{open}</span>
+          <button className="btn-primary file-save" onClick={save} disabled={!dirty || saving}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+        <textarea
+          className="file-editor mono"
+          value={content}
+          onChange={(e) => { setContent(e.target.value); setDirty(true); }}
+          spellCheck={false}
+        />
+        {msg && <p className="pane-msg mono">{msg}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="pane">
+      <span className="eyebrow">Editable files</span>
+      {files === null ? (
+        <p className="mono muted pane-loading">loading…</p>
+      ) : (
+        <ul className="file-list">
+          {files.map((f) => (
+            <li key={f.name}>
+              <button className="file-item" onClick={() => openFile(f.name)}>
+                <span className="mono file-name">{f.name}</span>
+                <span className="mono muted file-size">
+                  {f.exists ? `${f.size} B` : "new"}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {msg && <p className="pane-msg mono">{msg}</p>}
+      <p className="mono muted files-note">
+        SOUL is the persona · AGENTS the operating rules · MEMORY/USER the memory · config the model & tools.
+      </p>
     </div>
   );
 }

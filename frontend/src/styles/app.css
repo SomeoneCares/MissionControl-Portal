@@ -238,3 +238,30 @@
 .thinking-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--ember); animation: blink 1.2s steps(2) infinite; }
 .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
 .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+/* ===== agent drawer: tabs + admin panes ===== */
+.drawer-tabs { display: flex; gap: 2px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+.drawer-tab { flex: 1; padding: 9px; background: transparent; border: none; border-bottom: 2px solid transparent; cursor: pointer; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); transition: all 0.12s; }
+.drawer-tab:hover { color: var(--ink); }
+.drawer-tab.active { color: var(--ember); border-bottom-color: var(--ember); }
+.pane { display: flex; flex-direction: column; gap: 10px; }
+.pane-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: var(--panel-2); border-radius: var(--radius); }
+.current-model { font-size: 12px; color: var(--spot); }
+.pane-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-top: 4px; }
+.model-select, .file-editor { width: 100%; border: 1px solid var(--line); border-radius: var(--radius); background: var(--ground); color: var(--ink); font-size: 13px; }
+.model-select { padding: 10px; }
+.pane-save, .file-save { align-self: flex-start; }
+.pane-count, .pane-loading, .files-note { font-size: 10px; margin: 2px 0 0; }
+.files-note { line-height: 1.6; margin-top: 10px; }
+.pane-msg { font-size: 11px; line-height: 1.5; color: var(--ink-soft); background: var(--ok-bg); border-left: 2px solid var(--ok); padding: 8px 10px; border-radius: 0 8px 8px 0; margin: 6px 0 0; }
+.file-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.file-item { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 11px 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; transition: border-color 0.12s; }
+.file-item:hover { border-color: var(--ember); }
+.file-name { font-size: 13px; color: var(--ink); }
+.file-size { font-size: 10px; }
+.file-editor-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.file-back { background: none; border: none; color: var(--muted); cursor: pointer; font-family: var(--font-mono); font-size: 11px; }
+.file-back:hover { color: var(--ink); }
+.file-open-name { flex: 1; font-size: 12px; color: var(--ember); }
+.file-editor { min-height: 340px; padding: 12px; line-height: 1.55; resize: vertical; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+.file-editor:focus { outline: none; border-color: var(--ember); }
