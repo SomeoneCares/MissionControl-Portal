@@ -176,12 +176,14 @@ export interface ApprovalReq {
 
 export interface SubagentEvent {
   phase: "start" | "complete";
-  name: string;
-  goal?: string;
+  id?: string;         // delegation_id / child_session_id — pairs start with complete
+  goal?: string;       // what the child was asked to do (its effective identity)
+  model?: string;
   status?: string;
-  duration?: number;
-  tokens?: number;
-  id?: string;
+  duration?: number;   // seconds (from duration_seconds)
+  tokens?: number;     // input_tokens + output_tokens
+  summary?: string;    // the child's result summary
+  output_tail?: string; // tail of the child's output
 }
 
 export interface ChatHandlers {

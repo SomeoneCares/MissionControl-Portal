@@ -574,7 +574,7 @@ class Handler(BaseHTTPRequestHandler):
                 t = ev.get("type") or ev.get("event") or ev.get("name") or ""
                 if t == "reasoning.available":
                     send({"reasoning": ev.get("text", "")})
-                elif t == "message.delta":
+                elif t in ("message.delta", "assistant.delta"):
                     d = ev.get("delta", "")
                     if d:
                         send({"delta": d})
@@ -586,18 +586,23 @@ class Handler(BaseHTTPRequestHandler):
                                    "preview": ev.get("preview", ""),
                                    "duration": ev.get("duration"), "error": bool(ev.get("error"))}})
                 elif t in ("subagent.start", "subagent.started"):
+                    # subagent events carry goal/model/ids (no role name) — see _SUBAGENT_EVENT_KEYS.
                     send({"subagent": {"phase": "start",
-                                       "name": ev.get("role") or ev.get("name") or ev.get("assignee") or ev.get("profile") or "worker",
-                                       "goal": ev.get("goal") or ev.get("preview") or ev.get("task") or "",
-                                       "id": ev.get("delegation_id") or ev.get("child_session_id") or ev.get("id") or ""}})
+                                       "id": ev.get("delegation_id") or ev.get("child_session_id") or ev.get("subagent_id") or "",
+                                       "goal": ev.get("goal") or ev.get("preview") or "",
+                                       "model": ev.get("model") or ""}})
                 elif t in ("subagent.complete", "subagent.completed"):
-                    usage = ev.get("usage") or {}
+                    itok = ev.get("input_tokens") or 0
+                    otok = ev.get("output_tokens") or 0
                     send({"subagent": {"phase": "complete",
-                                       "name": ev.get("role") or ev.get("name") or ev.get("assignee") or ev.get("profile") or "worker",
-                                       "status": ev.get("status") or ("failed" if ev.get("error") else "completed"),
-                                       "duration": ev.get("duration"),
-                                       "tokens": ev.get("tokens") or usage.get("total_tokens"),
-                                       "id": ev.get("delegation_id") or ev.get("child_session_id") or ev.get("id") or ""}})
+                                       "id": ev.get("delegation_id") or ev.get("child_session_id") or ev.get("subagent_id") or "",
+                                       "goal": ev.get("goal") or "",
+                                       "status": ev.get("status") or "completed",
+                                       "duration": ev.get("duration_seconds"),
+                                       "tokens": (itok + otok) or None,
+                                       "summary": ev.get("summary") or "",
+                                       "output_tail": ev.get("output_tail") or "",
+                                       "model": ev.get("model") or ""}})
                 elif t == "approval.request":
                     send({"approval": {"choices": ev.get("choices", []), "text": ev.get("preview", "")}})
                 elif t.startswith("run."):

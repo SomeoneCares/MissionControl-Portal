@@ -381,14 +381,17 @@ function pairTools(tools: ToolEvent[]): ToolRow[] {
   return rows;
 }
 
-function pairSubagents(subs: SubagentEvent[]): { name: string; goal: string; status: string; duration?: number; tokens?: number }[] {
-  const rows: { name: string; goal: string; status: string; duration?: number; tokens?: number }[] = [];
+interface SubRow { id: string; goal: string; model?: string; status: string; duration?: number; tokens?: number; summary?: string; tail?: string; }
+function pairSubagents(subs: SubagentEvent[]): SubRow[] {
+  const rows: SubRow[] = [];
   for (const s of subs) {
-    if (s.phase === "start") rows.push({ name: s.name, goal: s.goal || "", status: "running" });
-    else {
-      const r = [...rows].reverse().find((x) => x.name === s.name && x.status === "running");
-      if (r) { r.status = s.status || "completed"; r.duration = s.duration; r.tokens = s.tokens; }
-      else rows.push({ name: s.name, goal: s.goal || "", status: s.status || "completed", duration: s.duration, tokens: s.tokens });
+    if (s.phase === "start") {
+      rows.push({ id: s.id || "", goal: s.goal || "", model: s.model, status: "running" });
+    } else {
+      const r = [...rows].reverse().find((x) => (s.id && x.id === s.id) || x.status === "running");
+      const patch = { status: s.status || "completed", duration: s.duration, tokens: s.tokens, summary: s.summary, tail: s.output_tail, goal: r?.goal || s.goal || "" };
+      if (r) Object.assign(r, patch);
+      else rows.push({ id: s.id || "", model: s.model, ...patch });
     }
   }
   return rows;
@@ -414,14 +417,17 @@ function Thinking({ reasoning, tools, subagents, live }: { reasoning?: string; t
             <ul className="subagent-timeline">
               {subs.map((s, i) => (
                 <li key={i} className={`subagent-ev ${s.status === "running" ? "running" : s.status.includes("fail") ? "error" : "done"}`}>
-                  <span className="subagent-icon">⇩</span>
-                  <span className="mono subagent-name">delegated → {s.name}</span>
-                  {s.goal && <span className="subagent-goal">{s.goal}</span>}
-                  <span className="subagent-meta mono">
-                    {s.status === "running" ? "running…" : s.status}
-                    {typeof s.duration === "number" ? ` · ${s.duration.toFixed(1)}s` : ""}
-                    {typeof s.tokens === "number" ? ` · ${s.tokens.toLocaleString()} tok` : ""}
-                  </span>
+                  <div className="subagent-row1">
+                    <span className="subagent-icon">⇩</span>
+                    <span className="mono subagent-name">delegated worker{s.model ? ` · ${s.model}` : ""}</span>
+                    <span className="subagent-meta mono">
+                      {s.status === "running" ? "running…" : s.status}
+                      {typeof s.duration === "number" ? ` · ${s.duration.toFixed(1)}s` : ""}
+                      {typeof s.tokens === "number" ? ` · ${s.tokens.toLocaleString()} tok` : ""}
+                    </span>
+                  </div>
+                  {s.goal && <div className="subagent-goal">{s.goal}</div>}
+                  {(s.summary || s.tail) && <div className="subagent-result">{s.summary || s.tail}</div>}
                 </li>
               ))}
             </ul>
