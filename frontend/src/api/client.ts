@@ -155,8 +155,11 @@ export interface ToolEvent {
   preview: string;
 }
 
+// Hermes sends approval choices as plain strings (e.g. "once" | "session" | "deny"); older
+// paths may send objects. Accept both.
+export type ApprovalChoice = string | { label?: string; value?: string; id?: string };
 export interface ApprovalReq {
-  choices: { label?: string; value?: string; id?: string }[];
+  choices: ApprovalChoice[];
   text: string;
 }
 

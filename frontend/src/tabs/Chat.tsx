@@ -1,7 +1,28 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { State, HealthInfo, Agent } from "../types";
-import { api, chatStream, type ChatMessage, type ChatAgents, type ToolEvent, type Attachment } from "../api/client";
+import { api, chatStream, type ChatMessage, type ChatAgents, type ToolEvent, type Attachment, type ApprovalChoice } from "../api/client";
 import { chatStore, type Turn } from "../store/chatStore";
+
+// Approval choices arrive as bare strings (Hermes) or objects (older paths). Normalise both to a
+// value we send back and a readable label, and a tone so approve/deny read at a glance.
+function choiceValue(c: ApprovalChoice): string {
+  return typeof c === "string" ? c : (c.value || c.id || c.label || "");
+}
+const CHOICE_LABELS: Record<string, string> = {
+  once: "Approve once", approve: "Approve", yes: "Approve", allow: "Approve once", accept: "Approve",
+  session: "Approve for session", always: "Always allow", all: "Approve all",
+  deny: "Deny", reject: "Deny", no: "Deny", cancel: "Deny", decline: "Deny", skip: "Skip",
+};
+function choiceLabel(c: ApprovalChoice): string {
+  const raw = (choiceValue(c) || "").trim();
+  return CHOICE_LABELS[raw.toLowerCase()] || raw || "Choose";
+}
+function choiceTone(val: string): string {
+  const v = val.toLowerCase();
+  if (/(deny|reject|^no$|cancel|decline)/.test(v)) return "danger";
+  if (/(approve|once|yes|allow|accept|always|all|session)/.test(v)) return "ok";
+  return "";
+}
 
 const TEXT_EXT = /\.(md|markdown|txt|json|csv|tsv|ya?ml|toml|ini|log|xml|html?|css|js|ts|tsx|jsx|py|sh|bash|sql|go|rs|c|cpp|h|java|rb|php)$/i;
 
@@ -262,11 +283,15 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
                     <span className="mono approval-label">⚑ approval needed</span>
                     {t.approval.text && <p className="approval-text">{t.approval.text}</p>}
                     <div className="approval-choices">
-                      {(t.approval.choices.length ? t.approval.choices : [{ label: "Approve", value: "approve" }, { label: "Deny", value: "deny" }]).map((c, k) => (
-                        <button key={k} className="approval-btn" onClick={() => respondApproval(c.value || c.id || c.label || "")}>
-                          {c.label || c.value || c.id}
-                        </button>
-                      ))}
+                      {(t.approval.choices.length ? t.approval.choices : ["approve", "deny"]).map((c, k) => {
+                        const val = choiceValue(c);
+                        return (
+                          <button key={k} className={`approval-btn ${choiceTone(val)}`}
+                                  onClick={() => respondApproval(val)}>
+                            {choiceLabel(c)}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

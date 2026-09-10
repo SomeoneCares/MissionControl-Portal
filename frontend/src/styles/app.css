@@ -288,8 +288,12 @@
 .approval-label { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--warn); }
 .approval-text { font-size: 13px; margin: 6px 0 8px; color: var(--ink); }
 .approval-choices { display: flex; gap: 8px; flex-wrap: wrap; }
-.approval-btn { padding: 7px 14px; border-radius: var(--radius); border: 1px solid var(--warn); background: var(--panel); color: var(--ink); cursor: pointer; font-size: 12px; }
-.approval-btn:hover { background: var(--warn); color: var(--panel); }
+.approval-btn { padding: 7px 14px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; font-size: 12px; font-weight: 500; }
+.approval-btn:hover { background: var(--ink); color: var(--ground); }
+.approval-btn.ok { border-color: var(--ok); color: var(--ok); }
+.approval-btn.ok:hover { background: var(--ok); color: var(--panel); }
+.approval-btn.danger { border-color: var(--danger); color: var(--danger); }
+.approval-btn.danger:hover { background: var(--danger); color: var(--panel); }
 
 /* ===== runs ===== */
 .runs, .schedule, .content-tab { display: flex; flex-direction: column; gap: 16px; }
