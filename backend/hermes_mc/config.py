@@ -76,6 +76,7 @@ class Config:
     gateway_url: str                # base URL of the Hermes gateway API (…:8642)
     gateway_key: str = field(repr=False)   # bearer token; never printed
     agent_logs_db: Optional[Path] = None   # run-history DB (Hermes agent hook writes it)
+    kanban_db: Optional[Path] = None       # Hermes' shared task board (read live, write via CLI)
     bridge_url: str = ""            # remote mode: base URL of the Hermes-host bridge
     bridge_key: str = field(repr=False, default="")
     host: str = "0.0.0.0"           # portal bind address
@@ -141,6 +142,8 @@ def load(env: Optional[dict] = None) -> Config:
             gateway_url=gateway_url.rstrip("/"),
             gateway_key=gateway_key,
             agent_logs_db=agent_logs_db,
+            kanban_db=(Path(getenv("HMC_KANBAN_DB")).expanduser() if getenv("HMC_KANBAN_DB")
+                       else (home / "kanban.db")),
             host=getenv("HMC_HOST") or "0.0.0.0",
             port=int(getenv("HMC_PORT") or "51770"),
         )

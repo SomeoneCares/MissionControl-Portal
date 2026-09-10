@@ -1,7 +1,7 @@
 // API client. Every URL is relative, so the app works against whatever host serves it —
 // no hardcoded endpoint, no per-install configuration in the bundle.
 
-import type { State, HealthInfo, BoardTask } from "../types";
+import type { State, HealthInfo, BoardTask, KanbanTask, TaskStage } from "../types";
 
 // the selected fleet is appended to every request; "primary" is the portal's own host
 let fleetId = "primary";
@@ -60,6 +60,9 @@ export const api = {
     postJSON<FleetInfo>("/api/fleets", spec),
   removeFleet: (id: string) => postJSON<{ removed: boolean }>("/api/fleets/remove", { id }),
   schedule: () => getJSON<{ jobs: CronJob[] }>("/api/schedule"),
+  tasks: () => getJSON<{ tasks: KanbanTask[]; stages: TaskStage[]; editable: boolean }>("/api/tasks"),
+  moveTask: (id: string, to: string, from: string) =>
+    postJSON<{ ok: boolean; message: string }>("/api/tasks/move", { id, to, from }),
   content: () => getJSON<{ docs: ContentDoc[] }>("/api/content"),
   contentDir: () => getJSON<ContentDirInfo>("/api/content/dir"),
   setContentDir: (p: string) => postJSON<ContentDirInfo>("/api/content/dir", { path: p }),

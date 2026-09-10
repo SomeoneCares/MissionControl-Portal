@@ -28,6 +28,7 @@ from . import config as config_mod
 from .agent_admin import AgentAdmin, AdminError
 from .board import Board
 from .content import ContentStore, ContentError
+from .kanban import KanbanSource, KanbanError
 from .fleets import FleetRegistry
 from .gateway import GatewayClient, GatewayError
 from .local_source import LocalSource
@@ -50,6 +51,7 @@ class DataProvider:
         # admin (model + file editing) is local-mode only; the gateway API is read-only for config
         self.admin = AgentAdmin(cfg.hermes_home) if cfg.is_local else None
         self.content_store = ContentStore(cfg.content_dir) if (cfg.is_local and cfg.content_dir) else None
+        self.kanban = KanbanSource(cfg.kanban_db, cfg.hermes_home) if (cfg.is_local and cfg.kanban_db) else None
         self._cache: dict = {"at": 0.0, "data": None}
         self._chat_routes: dict | None = None   # cached per-agent route resolution
         self._working: set[str] = set()          # agents with an in-flight run right now
@@ -129,6 +131,20 @@ class DataProvider:
         self.cfg.content_dir = path
         self.content_store = ContentStore(path)
         return self.content_dir_info()
+
+    def fleet_tasks(self) -> dict:
+        if self.kanban is not None:
+            tasks = self.kanban.tasks()
+            return {"tasks": tasks, "stages": self.kanban.stages(), "editable": True}
+        # remote: read whatever the bridge folded into state
+        data = self._build()
+        return {"tasks": data.get("fleet_tasks", []),
+                "stages": data.get("task_stages", []), "editable": False}
+
+    def move_task(self, task_id: str, to_stage: str, from_stage: str = "") -> dict:
+        if self.kanban is None:
+            raise KanbanError("task control is available in local mode only")
+        return self.kanban.move(task_id, to_stage, from_stage)
 
     def _bridge_get(self, path: str):
         import urllib.request
@@ -219,7 +235,34 @@ class DataProvider:
             data = self._local.build_state()
         else:
             data = self._remote_state()
-        # mark agents the portal knows are mid-run as working (live state for the Office etc.)
+        # fleet tasks + per-agent state from Hermes' real kanban board (local mode)
+        agent_state: dict[str, str] = {}
+        if self.kanban is not None:
+            try:
+                tasks = self.kanban.tasks()
+                data["fleet_tasks"] = tasks
+                data["task_stages"] = self.kanban.stages()
+                agent_state = self.kanban.agent_states(tasks)
+            except Exception:
+                data.setdefault("fleet_tasks", [])
+        else:
+            # remote mode: tasks/stages come through the bridge /state if present
+            data.setdefault("fleet_tasks", data.get("fleet_tasks", []))
+            for t in data.get("fleet_tasks", []):
+                a = (t.get("assignee") or "").strip().lower()
+                if not a:
+                    continue
+                if t.get("running") or t.get("status") == "running":
+                    agent_state[a] = "EXECUTING"
+                elif agent_state.get(a) != "EXECUTING":
+                    agent_state[a] = "ASSIGNED"
+        # apply the three states: ASSIGNED / EXECUTING from the board, then the portal's own
+        # in-flight chat runs also count as EXECUTING (live for the Office etc.)
+        for a in data.get("fleet", []):
+            code = a.get("agent")
+            s = agent_state.get((code or "").lower())
+            if s:
+                a["state"] = s
         if self._working:
             data["working_agents"] = sorted(set(data.get("working_agents", [])) | self._working)
             for a in data.get("fleet", []):
@@ -318,6 +361,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(self.provider.chat_agents())
         if path == "/api/schedule":
             return self._json({"jobs": self.provider.cron_jobs()})
+        if path == "/api/tasks":
+            return self._json(self.provider.fleet_tasks())
         if path == "/api/content":
             return self._json({"docs": self.provider.content_docs()})
         if path == "/api/content/dir":
@@ -362,7 +407,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/agents/skills":
             return self._admin_read(lambda a: self.provider.admin.list_skills(a))
         if path == "/api/state":
-            return self._json(self.provider.state())
+            force = (parse_qs(urlparse(self.path).query).get("force") or [""])[0] in ("1", "true", "yes")
+            return self._json(self.provider.state(force=force))
         if path == "/api/board":
             return self._json({"tasks": self.provider.board.list()})
         if path == "/events":
@@ -418,6 +464,12 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/agents/toolset":
                 return self._admin_write(lambda: self.provider.admin.set_toolset(
                     body.get("agent", ""), body.get("toolset", ""), bool(body.get("enabled"))))
+            if path == "/api/tasks/move":
+                try:
+                    return self._json(self.provider.move_task(
+                        body.get("id", ""), body.get("to", ""), body.get("from", "")))
+                except KanbanError as e:
+                    return self._json({"error": str(e)}, status=400)
             if path == "/api/content/dir":
                 try:
                     return self._json(self.provider.set_content_dir(body.get("path", "")))

@@ -226,9 +226,10 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[], opt
 
   function stateIntensity(state: string, seed: number, t: number): number {
     if (state === "EXECUTING" || state === "PROCESSING_NOW" || state === "TASK_IN_PROGRESS") return 0.85 + 0.15 * Math.sin(t * 2 + seed * 6.28);
+    if (state === "ASSIGNED" || state === "TASK_ASSIGNED") { const on = (seed * 29) % 1 > 0.32 ? 1 : 0; return on * 0.72; } // task assigned: steady blue glow, most windows lit
     if (state === "THINKING") { const on = (seed * 17) % 1 > 0.4 ? 1 : 0; return on * (0.55 + 0.25 * Math.sin(t * 1.1 + seed * 4)); }
     if (state === "RETRY") { const fl = Math.sin(t * 18 + seed * 9); const on = (seed * 13) % 1 > 0.55 ? 1 : 0; return on * (0.5 + 0.5 * (fl > 0 ? 1 : 0.2)); }
-    const on = (seed * 31) % 1 > 0.82 ? 1 : 0; return on * 0.35; // IDLE
+    const on = (seed * 31) % 1 > 0.82 ? 1 : 0; return on * 0.35; // IDLE: dim, sparse
   }
 
   function stone() { return new THREE.MeshStandardMaterial({ color: "#cdd4dc", roughness: 0.6, metalness: 0.15 }); }
@@ -329,8 +330,12 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[], opt
     scene.add(root);
   });
 
-  const WORK_COL = new THREE.Color(SPOTLIGHT), IDLE_COL = new THREE.Color(EMBER);
-  const workingSet = new Set(fleet.filter((a) => a.state === "EXECUTING" || a.state === "PROCESSING_NOW" || a.state === "TASK_IN_PROGRESS").map((a) => a.agent));
+  // three states, three hues: EXECUTING pulses green (processing now), ASSIGNED glows steady orange
+  // (task in hand), IDLE glows the accent blue (dim).
+  const WORK_COL = new THREE.Color(SPOTLIGHT), ASSIGNED_COL = new THREE.Color("#ee8a2f"), IDLE_COL = new THREE.Color(EMBER);
+  const stateOf = new Map(fleet.map((a) => [a.agent, (a.state || "IDLE").toUpperCase()]));
+  const isExec = (s: string) => s === "EXECUTING" || s === "PROCESSING_NOW" || s === "TASK_IN_PROGRESS";
+  const isAssigned = (s: string) => s === "ASSIGNED" || s === "TASK_ASSIGNED";
 
   let selected: string | null = null;
   let hovered: string | null = null;
@@ -388,15 +393,16 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[], opt
       const target = sel || hov ? 0.35 : 0;
       b.inner.position.y += (target - b.inner.position.y) * 0.12;
       b.halo.visible = sel || hov;
-      const working = workingSet.has(b.a.code);
-      const col = working ? WORK_COL : IDLE_COL;
+      const st = stateOf.get(b.a.code) || "IDLE";
+      const exec = isExec(st), assigned = isAssigned(st);
+      const col = exec ? WORK_COL : assigned ? ASSIGNED_COL : IDLE_COL; // green / orange / blue
       const wd = b.windows.userData as { accent: THREE.Color; dim: THREE.Color; instances: Inst[]; state: string };
       wd.accent.copy(col);
       (b.windows.material as THREE.MeshStandardMaterial).emissive.copy(col);
       (b.halo.material as THREE.MeshBasicMaterial).color.copy(col);
       b.accentMats.forEach((m) => m.emissive.copy(col));
       const list = wd.instances, accent = wd.accent, dim = wd.dim;
-      const state = working ? "EXECUTING" : wd.state;
+      const state = exec ? "EXECUTING" : assigned ? "ASSIGNED" : "IDLE";
       for (let i = 0; i < list.length; i++) {
         const inst = list[i];
         tmpObj.position.copy(inst.pos); tmpObj.rotation.copy(inst.rot);

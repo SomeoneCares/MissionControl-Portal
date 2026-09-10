@@ -33,7 +33,8 @@ export function Office({ state }: { state: State }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, fleetKey, accent]);
 
-  const lightsOn = state.fleet.filter((a) => a.state === "EXECUTING" || a.state === "TASK_IN_PROGRESS").length;
+  const execN = state.fleet.filter((a) => ["EXECUTING", "PROCESSING_NOW", "TASK_IN_PROGRESS"].includes(a.state)).length;
+  const assignedN = state.fleet.filter((a) => ["ASSIGNED", "TASK_ASSIGNED"].includes(a.state)).length;
   const dossier: Agent | undefined = selected ? state.fleet.find((a) => a.agent === selected) : undefined;
 
   return (
@@ -47,8 +48,8 @@ export function Office({ state }: { state: State }) {
           </h1>
           <p className="muted office-sub">
             {view === "skyline"
-              ? "Every agent owns a tower; the orchestrator runs HQ at the centre. Taller means busier; lit windows mean live work."
-              : "The orchestrator is the core; each specialist holds an orbit. Body size is workload share, orbit speed is runs today."}
+              ? "Every agent owns a tower; the orchestrator runs HQ at the centre. Green pulse = executing now, steady orange = task assigned, blue = idle."
+              : "The orchestrator is the core; each specialist holds an orbit. Body size is workload share, orbit speed is runs today. Green = executing now, orange = task assigned, blue = idle."}
           </p>
         </div>
         <div className="office-controls">
@@ -58,7 +59,8 @@ export function Office({ state }: { state: State }) {
           </div>
           <div className="office-stats mono">
             <span>{state.fleet.length} buildings</span>
-            <span>{lightsOn} lit</span>
+            <span>{execN} executing</span>
+            <span>{assignedN} assigned</span>
           </div>
         </div>
       </section>

@@ -41,8 +41,27 @@ export interface BoardTask {
   priority: "P1" | "P2" | "P3";
 }
 
+// A task from Hermes' real kanban board (fleet-wide, shared across profiles).
+export interface KanbanTask {
+  id: string;
+  title: string;
+  assignee: string;
+  status: string;   // triage | todo | scheduled | ready | running | review | blocked | done
+  stage: string;    // grouped column key
+  priority: number;
+  running: boolean;
+  error: string;
+  created_at: number | null;
+  started_at: number | null;
+  completed_at: number | null;
+}
+
+export interface TaskStage { key: string; label: string; }
+
 export interface State {
   fleet: Agent[];
+  fleet_tasks?: KanbanTask[];
+  task_stages?: TaskStage[];
   models: { id: string; label: string }[];
   model_usage: { name: string; count: number; pct: number }[];
   routing: {

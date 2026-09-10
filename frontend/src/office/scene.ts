@@ -43,6 +43,7 @@ export interface SceneController {
 
 // shared office palette (accent-driven, cool)
 const SPOTLIGHT = 0x37e08a; // processing-now pulse (green), like the original
+const ASSIGNED = 0xee8a2f;  // task-assigned glow (orange)
 const BG = 0x0a0b10;        // cool near-black sky
 const RING = 0x8b95a3;      // silver armature, matching the grey monuments
 
@@ -51,6 +52,9 @@ function isOrch(a: FleetAgent): boolean {
 }
 function isWorking(a: FleetAgent): boolean {
   return a.state === "EXECUTING" || a.state === "PROCESSING_NOW" || a.state === "TASK_IN_PROGRESS";
+}
+function isAssigned(a: FleetAgent): boolean {
+  return a.state === "ASSIGNED" || a.state === "TASK_ASSIGNED";
 }
 
 function glowTexture(): THREE.Texture {
@@ -175,15 +179,16 @@ export function buildArmillary(canvas: HTMLCanvasElement, fleet: FleetAgent[], o
     const ring = new THREE.Mesh(new THREE.TorusGeometry(R, 0.02, 8, 140), new THREE.MeshStandardMaterial(ringMat));
     pivot.add(ring);
     const rad = 0.13 + Math.sqrt(Math.max(0, a.share)) * 0.1;
-    const working = isWorking(a);
-    const active = working || a.tasksToday > 0;
-    const bodyColor = working ? SPOTLIGHT : active ? EMBER_SOFT : 0x59616e;
+    const working = isWorking(a);       // executing → green
+    const assigned = isAssigned(a);     // task assigned → orange
+    const active = working || assigned;
+    const bodyColor = working ? SPOTLIGHT : assigned ? ASSIGNED : EMBER_SOFT; // green / orange / accent-blue (idle)
     const body = new THREE.Mesh(new THREE.SphereGeometry(rad, 24, 24), new THREE.MeshStandardMaterial({
-      color: bodyColor, emissive: working ? 0x0d5a34 : active ? EMBER : 0x000000, emissiveIntensity: active ? 0.5 : 0, roughness: 0.55, metalness: 0.25,
+      color: bodyColor, emissive: working ? 0x0d5a34 : assigned ? ASSIGNED : EMBER, emissiveIntensity: active ? 0.5 : 0.16, roughness: 0.55, metalness: 0.25,
     }));
     body.userData.agent = a.agent;
     pivot.add(body);
-    const bglow = glowSprite(glow, rad * 5, working ? SPOTLIGHT : active ? EMBER_SOFT : 0x7a828e, active ? 0.55 : 0.18);
+    const bglow = glowSprite(glow, rad * 5, working ? SPOTLIGHT : assigned ? ASSIGNED : EMBER, active ? 0.55 : 0.2);
     pivot.add(bglow);
     const label = labelSprite(a.initials, 0.34); pivot.add(label);
     bodies.push({ pivot, body, bglow, label, agent: a, R, spd: 0.1 + (a.tasksToday / maxTasks) * 0.42, ph: i * 1.1, working });
