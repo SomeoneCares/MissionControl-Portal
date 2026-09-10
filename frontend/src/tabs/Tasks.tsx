@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { KanbanTask, TaskStage } from "../types";
 import { api } from "../api/client";
+import { TaskDrawer } from "../TaskDrawer";
 
 // Tasks — the fleet's live task board, read straight from Hermes' shared kanban (kanban.db).
 // Tasks appear when agents create or delegate work, and move through stages on their own as the
@@ -13,6 +14,7 @@ export function Tasks() {
   const [stages, setStages] = useState<TaskStage[]>([]);
   const [editable, setEditable] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const dragFrom = useRef<string>("");
@@ -80,10 +82,12 @@ export function Tasks() {
                 {items.map((t) => (
                   <div
                     key={t.id}
-                    className={`task-card ${dragId === t.id ? "dragging" : ""}`}
+                    className={`task-card clickable ${dragId === t.id ? "dragging" : ""}`}
                     draggable={editable}
                     onDragStart={() => { setDragId(t.id); dragFrom.current = t.stage; }}
                     onDragEnd={() => setDragId(null)}
+                    onClick={() => setDetailId(t.id)}
+                    title="Click to see what's going on"
                   >
                     <div className="task-top">
                       <span className={`status-chip st-${t.stage}`}>{t.status}</span>
@@ -107,6 +111,8 @@ export function Tasks() {
           moves through the stages on its own.
         </p>
       )}
+
+      <TaskDrawer id={detailId} onClose={() => setDetailId(null)} />
     </div>
   );
 }

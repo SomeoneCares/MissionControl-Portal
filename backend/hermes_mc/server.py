@@ -149,6 +149,9 @@ class DataProvider:
             raise KanbanError("task control is available in local mode only")
         return self.kanban.move(task_id, to_stage, from_stage)
 
+    def task_detail(self, task_id: str) -> dict:
+        return self.kanban.task_detail(task_id) if self.kanban is not None else {}
+
     def _bridge_get(self, path: str):
         import urllib.request
         try:
@@ -491,6 +494,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"jobs": self.provider.cron_jobs()})
         if path == "/api/tasks":
             return self._json(self.provider.fleet_tasks())
+        if path == "/api/tasks/detail":
+            tid = (parse_qs(urlparse(self.path).query).get("id") or [""])[0]
+            return self._json(self.provider.task_detail(tid))
         if path == "/api/content":
             return self._json({"docs": self.provider.content_docs()})
         if path == "/api/content/dir":

@@ -79,6 +79,61 @@ class KanbanSource:
             })
         return out
 
+    def task_detail(self, task_id: str) -> dict:
+        """Everything about one task — its fields (incl. body/result), the worker's comments,
+        and its run history. This is the 'what is going on' view. Read-only, schema-tolerant."""
+        if not self.db.exists() or not task_id:
+            return {}
+        try:
+            conn = sqlite3.connect(f"file:{self.db}?mode=ro", uri=True, timeout=2.0)
+            conn.row_factory = sqlite3.Row
+            try:
+                t = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+                if not t:
+                    return {}
+                task = dict(t)
+
+                def _rows(sql):
+                    try:
+                        return [dict(r) for r in conn.execute(sql, (task_id,)).fetchall()]
+                    except sqlite3.Error:
+                        return []
+                comments = _rows("SELECT * FROM task_comments WHERE task_id=? ORDER BY rowid ASC")
+                runs = _rows("SELECT * FROM task_runs WHERE task_id=? ORDER BY rowid ASC")
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return {}
+        status = (task.get("status") or "").strip()
+        return {
+            "id": task.get("id"),
+            "title": task.get("title") or "(untitled)",
+            "assignee": (task.get("assignee") or "").strip(),
+            "status": status,
+            "stage": _STATUS_TO_STAGE.get(status, "todo"),
+            "priority": task.get("priority") or 0,
+            "created_at": task.get("created_at"),
+            "started_at": task.get("started_at"),
+            "completed_at": task.get("completed_at"),
+            "running": bool(task.get("current_run_id")) or status == "running",
+            "error": task.get("last_failure_error") or "",
+            "body": task.get("body") or "",
+            "result": task.get("result") or "",
+            "comments": [{
+                "author": c.get("author") or c.get("created_by") or "",
+                "body": c.get("body") or c.get("text") or "",
+                "at": c.get("created_at"),
+            } for c in comments],
+            "runs": [{
+                "profile": r.get("profile") or "",
+                "status": r.get("status") or r.get("outcome") or "",
+                "summary": r.get("summary") or "",
+                "error": r.get("error") or r.get("last_failure_error") or "",
+                "started_at": r.get("started_at"),
+                "finished_at": r.get("finished_at"),
+            } for r in runs],
+        }
+
     def agent_states(self, tasks: Optional[list[dict]] = None) -> dict[str, str]:
         """Per-assignee state: EXECUTING (a task is running) > ASSIGNED (has an open task) > (idle)."""
         tasks = self.tasks() if tasks is None else tasks

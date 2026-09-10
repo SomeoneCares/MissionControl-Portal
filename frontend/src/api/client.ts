@@ -81,6 +81,7 @@ export const api = {
   removeFleet: (id: string) => postJSON<{ removed: boolean }>("/api/fleets/remove", { id }),
   schedule: () => getJSON<{ jobs: CronJob[] }>("/api/schedule"),
   tasks: () => getJSON<{ tasks: KanbanTask[]; stages: TaskStage[]; editable: boolean }>("/api/tasks"),
+  taskDetail: (id: string) => getJSON<TaskDetail>(`/api/tasks/detail?id=${encodeURIComponent(id)}`),
   moveTask: (id: string, to: string, from: string) =>
     postJSON<{ ok: boolean; message: string }>("/api/tasks/move", { id, to, from }),
   content: () => getJSON<{ docs: ContentDoc[] }>("/api/content"),
@@ -112,6 +113,24 @@ export const api = {
     remove: (id: string) => postJSON<{ deleted: boolean }>("/api/board/delete", { id }),
   },
 };
+
+export interface TaskDetail {
+  id: string;
+  title: string;
+  assignee: string;
+  status: string;
+  stage: string;
+  priority: number;
+  created_at: number | null;
+  started_at: number | null;
+  completed_at: number | null;
+  running: boolean;
+  error: string;
+  body: string;
+  result: string;
+  comments: { author: string; body: string; at: number | null }[];
+  runs: { profile: string; status: string; summary: string; error: string; started_at: number | null; finished_at: number | null }[];
+}
 
 export interface ChatMessage {
   role: "user" | "assistant" | "system";

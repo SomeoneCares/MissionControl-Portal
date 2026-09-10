@@ -1,5 +1,7 @@
+import { useState } from "react";
 import type { State, HealthInfo } from "../types";
 import { CpuIcon, RamIcon, DiskIcon, GatewayIcon, SendIcon, LinkIcon } from "../components/Icons";
+import { TaskDrawer } from "../TaskDrawer";
 
 // Overview — the live snapshot. Every value comes from /api/state; empty sources say so plainly.
 
@@ -14,6 +16,10 @@ function tone(v: number, warn: number, danger: number) { return v >= danger ? "d
 
 export function Overview({ state, health }: { state: State; health: HealthInfo | null }) {
   const { fleet, routing, agentlogs_stats, agentlogs, vps, sessions, model_usage } = state;
+  const [detailId, setDetailId] = useState<string | null>(null);
+  // An activity line maps to a board task when its description is that task's title (kanban
+  // workers log the task title); clicking it then opens the task's "what's going on" detail.
+  const taskForLog = (l: { task: string }) => (state.fleet_tasks || []).find((ft) => ft.title && ft.title === l.task);
   const openMissions = state.board.filter((t) => t.status !== "done").length;
   const doneMissions = state.board.filter((t) => t.status === "done").length;
   const topAgent = [...fleet].sort((a, b) => b.share - a.share)[0];
@@ -160,18 +166,25 @@ export function Overview({ state, health }: { state: State; health: HealthInfo |
             <p className="empty-block mono">No agent runs recorded yet on this host.</p>
           ) : (
             <ul className="log-list">
-              {agentlogs.slice(0, 8).map((l, i) => (
-                <li key={i}>
-                  <span className={`log-dot ${l.status === "completed" ? "ok" : l.status === "failed" ? "bad" : ""}`} />
-                  <span className="mono log-agent">{l.agent}</span>
-                  <span className="log-task">{l.task || "(no description)"}</span>
-                  <span className="mono muted log-model">{l.model}</span>
-                </li>
-              ))}
+              {agentlogs.slice(0, 8).map((l, i) => {
+                const ft = taskForLog(l);
+                return (
+                  <li key={i} className={ft ? "log-clickable" : ""}
+                      onClick={ft ? () => setDetailId(ft.id) : undefined}
+                      title={ft ? "Click to see what's going on" : undefined}>
+                    <span className={`log-dot ${l.status === "completed" ? "ok" : l.status === "failed" ? "bad" : ""}`} />
+                    <span className="mono log-agent">{l.agent}</span>
+                    <span className="log-task">{l.task || "(no description)"}</span>
+                    <span className="mono muted log-model">{l.model}</span>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
       </section>
+
+      <TaskDrawer id={detailId} onClose={() => setDetailId(null)} />
     </div>
   );
 }
