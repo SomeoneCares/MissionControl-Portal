@@ -41,7 +41,8 @@ class AgentAdmin:
     # -- directory resolution (orchestrator = root) ------------------------
 
     def _agent_dir(self, agent: str) -> Path:
-        d = self.home if agent == "orchestrator" else self.home / "profiles" / agent
+        # The root agent is Hermes' "default" (older hosts: "orchestrator"); both live in ~/.hermes.
+        d = self.home if agent in ("default", "orchestrator") else self.home / "profiles" / agent
         if not d.is_dir():
             raise AdminError(f"unknown agent: {agent}")
         return d

@@ -114,7 +114,10 @@ class KanbanSource:
             raise KanbanError("hermes kanban timed out")
         out = (p.stdout or "").strip()
         err = (p.stderr or "").strip()
-        if p.returncode != 0 or out.lower().startswith("cannot") or "error" in err.lower():
+        # Trust the exit code; the CLI also signals a soft failure by starting stdout with
+        # "cannot"/"error". Do NOT treat any stderr containing "error" as failure — benign
+        # warnings ("0 errors", deprecation notices) would be misread as a failed move.
+        if p.returncode != 0 or out[:6].lower() in ("cannot", "error:") or out.lower().startswith(("cannot ", "error:")):
             raise KanbanError(out or err or f"hermes could not {verb} this task")
         return out or f"{verb} ok"
 

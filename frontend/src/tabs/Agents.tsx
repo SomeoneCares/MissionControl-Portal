@@ -11,10 +11,9 @@ export function Agents({ state }: { state: State }) {
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    // Toolsets are a fleet-wide capability, read from the gateway via the backend.
-    fetch("/api/toolsets")
-      .then((r) => (r.ok ? r.json() : { data: [] }))
-      .then((d) => setToolsets((d.data ?? []).map((t: any) => t.name)))
+    // Toolsets are a fleet-wide capability, read from the gateway via the backend (fleet-aware).
+    api.toolsets()
+      .then((d) => setToolsets((d.data ?? []).map((t: { name: string }) => t.name)))
       .catch(() => setToolsets([]));
   }, []);
 
@@ -288,7 +287,7 @@ function SkillsPane({ agent }: { agent: Agent }) {
   const load = () => api.agentSkills(agent.agent).then((d) => { setInstalled(d.installed); setDisabled(d.disabled_toolsets); }).catch(() => setInstalled([]));
   useEffect(() => {
     load();
-    fetch("/api/toolsets").then((r) => r.ok ? r.json() : { data: [] }).then((d) => setToolsets((d.data ?? []).map((t: any) => t.name))).catch(() => setToolsets([]));
+    api.toolsets().then((d) => setToolsets((d.data ?? []).map((t: { name: string }) => t.name))).catch(() => setToolsets([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agent.agent]);
 

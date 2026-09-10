@@ -9,6 +9,7 @@ from __future__ import annotations
 import sqlite3
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 _VALID_STATUS = ("todo", "doing", "done")
@@ -21,10 +22,17 @@ class Board:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init()
 
-    def _con(self) -> sqlite3.Connection:
+    @contextmanager
+    def _con(self):
+        """A connection that commits on success, rolls back on error, and always closes —
+        the plain `with sqlite3.connect(...)` form leaks the handle (never closes)."""
         con = sqlite3.connect(str(self.path), timeout=5.0)
         con.row_factory = sqlite3.Row
-        return con
+        try:
+            with con:
+                yield con
+        finally:
+            con.close()
 
     def _init(self) -> None:
         with self._con() as con:

@@ -3,9 +3,14 @@
 
 import type { State, HealthInfo, BoardTask, KanbanTask, TaskStage } from "../types";
 
-// the selected fleet is appended to every request; "primary" is the portal's own host
-let fleetId = "primary";
-export function setFleet(id: string) { fleetId = id || "primary"; }
+// the selected fleet is appended to every request; "primary" is the portal's own host.
+// Persisted so the choice survives the page reload that the fleet switcher triggers to apply it.
+const FLEET_KEY = "hermes-mc-fleet";
+let fleetId = (() => { try { return localStorage.getItem(FLEET_KEY) || "primary"; } catch { return "primary"; } })();
+export function setFleet(id: string) {
+  fleetId = id || "primary";
+  try { localStorage.setItem(FLEET_KEY, fleetId); } catch { /* private mode */ }
+}
 export function getFleet() { return fleetId; }
 export function withFleet(path: string): string {
   if (fleetId === "primary") return path;
@@ -36,6 +41,7 @@ export const api = {
   health: () => getJSON<HealthInfo>("/api/health"),
   state: () => getJSON<State>("/api/state"),
   capabilities: () => getJSON<Record<string, unknown>>("/api/capabilities"),
+  toolsets: () => getJSON<{ data: { name: string }[] }>("/api/toolsets"),
   chatAgents: () => getJSON<ChatAgents>("/api/chat/agents"),
   models: () => getJSON<{ models: ModelOption[]; editable: boolean }>("/api/models"),
   agentFiles: (agent: string) =>
