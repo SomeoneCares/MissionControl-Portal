@@ -58,7 +58,7 @@ export function Office({ state }: { state: State }) {
 
       <section className="office-stage card">
         <canvas ref={canvasRef} className="office-canvas" />
-        <div className="office-hint mono">drifting view · generated from the live fleet</div>
+        <div className="office-hint mono">drag · scroll · zoom &nbsp;·&nbsp; generated from the live fleet</div>
       </section>
     </div>
   );

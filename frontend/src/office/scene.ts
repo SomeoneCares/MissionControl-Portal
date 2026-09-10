@@ -3,6 +3,7 @@
 // between reloads and a new agent simply appears. Ink/ember palette, drifting camera.
 
 import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 export interface FleetAgent {
   agent: string;
@@ -18,9 +19,17 @@ export interface SceneController {
   dispose: () => void;
 }
 
+// The original skyline palette.
 const EMBER = 0xe25822;
 const SOFT = 0xf59e6b;
+const INK = 0x1a1410;
+const INK_2 = 0x241a13;
+const SPOTLIGHT = 0x00e5ff; // active/working — the cyan the original used for live work
 const BRASS = 0x9a7448;
+
+function isWorking(a: FleetAgent): boolean {
+  return a.state === "EXECUTING" || a.state === "PROCESSING_NOW" || a.state === "TASK_IN_PROGRESS";
+}
 
 function hash(s: string): number {
   let h = 2166136261;
@@ -89,14 +98,31 @@ function glowSprite(tex: THREE.Texture, size: number, color: number, opacity: nu
 }
 
 function baseScene(canvas: HTMLCanvasElement): {
-  renderer: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.PerspectiveCamera; resize: () => void;
+  renderer: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.PerspectiveCamera;
+  controls: OrbitControls; resize: () => void;
 } {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0e0a06);
-  scene.fog = new THREE.FogExp2(0x0e0a06, 0.032);
-  const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 220);
+  scene.background = new THREE.Color(INK);
+  scene.fog = new THREE.FogExp2(INK, 0.028);
+  const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 400);
+
+  // The original skyline controls: drag to orbit, scroll to zoom. A gentle auto-rotate runs
+  // until the operator grabs it, then resumes after they let go.
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.enablePan = false;
+  controls.autoRotate = true;
+  controls.autoRotateSpeed = 0.5;
+  controls.minDistance = 6;
+  controls.maxDistance = 90;
+  controls.maxPolarAngle = Math.PI * 0.49; // don't drop below the ground
+  const resume = () => { window.setTimeout(() => { controls.autoRotate = true; }, 2500); };
+  controls.addEventListener("start", () => { controls.autoRotate = false; });
+  controls.addEventListener("end", resume);
+
   const resize = () => {
     const w = canvas.clientWidth, h = canvas.clientHeight;
     if (!w || !h) return;
@@ -105,7 +131,7 @@ function baseScene(canvas: HTMLCanvasElement): {
     camera.updateProjectionMatrix();
   };
   resize();
-  return { renderer, scene, camera, resize };
+  return { renderer, scene, camera, controls, resize };
 }
 
 // ---------------------------------------------------------------------------
@@ -113,17 +139,19 @@ function baseScene(canvas: HTMLCanvasElement): {
 // ---------------------------------------------------------------------------
 
 export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[]): SceneController {
-  const { renderer, scene, camera, resize } = baseScene(canvas);
+  const { renderer, scene, camera, controls, resize } = baseScene(canvas);
   const glow = glowTexture();
-  camera.position.set(0, 7, 15);
+  camera.position.set(0, 8, 18);
+  controls.target.set(0, 3, 0);
 
   scene.add(new THREE.AmbientLight(0x40301f, 0.6));
   const key = new THREE.PointLight(EMBER, 2.2, 40); key.position.set(0, 8, 0); scene.add(key);
+  const rim = new THREE.DirectionalLight(SOFT, 0.7); rim.position.set(-10, 12, 8); scene.add(rim);
   scene.add(new THREE.HemisphereLight(0x40301f, 0x0a0705, 0.5));
 
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(120, 120),
-    new THREE.MeshStandardMaterial({ color: 0x120d09, roughness: 0.96 }));
+    new THREE.PlaneGeometry(200, 200),
+    new THREE.MeshStandardMaterial({ color: INK_2, roughness: 0.96 }));
   ground.rotation.x = -Math.PI / 2; scene.add(ground);
   const grid = new THREE.GridHelper(80, 80, 0x2a1f17, 0x1a130d);
   (grid.material as THREE.Material).opacity = 0.35; (grid.material as THREE.Material).transparent = true;
@@ -150,9 +178,10 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[]): Sc
     const rows = Math.max(3, Math.round(h * 1.6));
     const pts: number[] = [];
     const colors: number[] = [];
-    const lit = a.state === "EXECUTING" || a.state === "PROCESSING_NOW" || a.state === "TASK_IN_PROGRESS";
-    const litShare = lit ? 0.85 : 0.18 + (a.tasksToday / maxTasks) * 0.4;
-    const cLit = new THREE.Color(hq ? EMBER : SOFT);
+    const working = isWorking(a);
+    const litShare = working ? 0.9 : 0.18 + (a.tasksToday / maxTasks) * 0.4;
+    // original palette: cyan spotlight when the agent is live, ember otherwise
+    const cLit = new THREE.Color(working ? SPOTLIGHT : hq ? EMBER : SOFT);
     const cDark = new THREE.Color(0x3a2c20);
     for (let f = 0; f < 4; f++) {
       const ang = (f / 4) * Math.PI * 2;
@@ -179,7 +208,10 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[]): Sc
     }));
     scene.add(windows);
 
-    if (hq) { const g = glowSprite(glow, 5, EMBER, 0.5); g.position.set(x, h + 0.5, z); scene.add(g); }
+    if (hq || working) {
+      const g = glowSprite(glow, hq ? 5 : 3, working ? SPOTLIGHT : EMBER, working ? 0.7 : 0.5);
+      g.position.set(x, h + 0.5, z); scene.add(g);
+    }
     const lb = labelSprite(a.initials, glow, hq ? 0.6 : 0.44);
     lb.position.set(x, h + (hq ? 1.1 : 0.7), z);
     scene.add(lb);
@@ -195,16 +227,14 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[]): Sc
   specialists.forEach((a, i) => makeTower(a, positions[i].x, positions[i].z, false));
   const R = positions.length ? Math.max(...positions.map((p) => Math.hypot(p.x, p.z))) : 7;
 
-  let raf = 0; let t0 = 0;
+  camera.position.set(0, 8, R + 14);
+  let raf = 0;
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  function loop(ms: number) {
-    if (!t0) t0 = ms;
-    const t = (ms - t0) / 1000;
-    const rad = R + 10;
-    camera.position.set(Math.sin(t * 0.06) * rad, 7 + Math.sin(t * 0.12) * 1.5, Math.cos(t * 0.06) * rad);
-    camera.lookAt(0, 3, 0);
+  if (reduced) controls.autoRotate = false;
+  function loop() {
+    controls.update();
     renderer.render(scene, camera);
-    if (!reduced) raf = requestAnimationFrame(loop);
+    raf = requestAnimationFrame(loop);
   }
   raf = requestAnimationFrame(loop);
   window.addEventListener("resize", resize);
@@ -213,6 +243,7 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[]): Sc
     dispose() {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", resize);
+      controls.dispose();
       renderer.dispose();
       scene.traverse((o) => {
         const any = o as unknown as { geometry?: THREE.BufferGeometry; material?: THREE.Material | THREE.Material[] };
@@ -229,11 +260,11 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[]): Sc
 // ---------------------------------------------------------------------------
 
 export function buildArmillary(canvas: HTMLCanvasElement, fleet: FleetAgent[]): SceneController {
-  const { renderer, scene, camera, resize } = baseScene(canvas);
-  scene.background = new THREE.Color(0x0c0906);
-  scene.fog = new THREE.FogExp2(0x0c0906, 0.03);
+  const { renderer, scene, camera, controls, resize } = baseScene(canvas);
   const glow = glowTexture();
-  camera.position.set(0, 3, 13);
+  camera.position.set(0, 3, 14);
+  controls.target.set(0, 0, 0);
+  controls.autoRotateSpeed = 0.8;
 
   scene.add(new THREE.AmbientLight(0x3a2a1c, 0.6));
   const core = new THREE.PointLight(0xffa265, 3.0, 40); scene.add(core);
@@ -264,33 +295,38 @@ export function buildArmillary(canvas: HTMLCanvasElement, fleet: FleetAgent[]): 
     const ring = new THREE.Mesh(new THREE.TorusGeometry(R, 0.02, 8, 140), new THREE.MeshStandardMaterial(brass));
     pivot.add(ring);
     const rad = 0.13 + Math.sqrt(Math.max(0, a.share)) * 0.1;
-    const lit = a.tasksToday > 0;
+    const working = isWorking(a);
+    const active = working || a.tasksToday > 0;
+    // cyan spotlight when live, warm ember when merely active, dim when never run
+    const bodyColor = working ? SPOTLIGHT : active ? SOFT : 0x5a4838;
     const body = new THREE.Mesh(new THREE.SphereGeometry(rad, 24, 24), new THREE.MeshStandardMaterial({
-      color: lit ? SOFT : 0x5a4838, emissive: lit ? 0x7a3818 : 0x000000, roughness: 0.55, metalness: 0.25,
+      color: bodyColor, emissive: working ? 0x0a4a55 : active ? 0x7a3818 : 0x000000,
+      roughness: 0.55, metalness: 0.25,
     }));
     pivot.add(body);
-    const bglow = glowSprite(glow, rad * 5, lit ? SOFT : 0x6b5847, lit ? 0.55 : 0.18); pivot.add(bglow);
+    const bglow = glowSprite(glow, rad * 5, working ? SPOTLIGHT : active ? SOFT : 0x6b5847, active ? 0.55 : 0.18);
+    pivot.add(bglow);
     const label = labelSprite(a.initials, glow, 0.34); pivot.add(label);
     bodies.push({ pivot, body, bglow, label, R, spd: 0.1 + (a.tasksToday / maxTasks) * 0.42, ph: i * 1.1 });
   });
 
   let raf = 0; let t0 = 0;
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduced) controls.autoRotate = false;
   function loop(ms: number) {
     if (!t0) t0 = ms;
     const t = (ms - t0) / 1000;
-    camera.position.set(Math.sin(t * 0.085) * 12, 2.4 + Math.sin(t * 0.16) * 1.6, Math.cos(t * 0.085) * 12);
-    camera.lookAt(0, 0, 0);
     const s = 1 + Math.sin(t * 2.1) * 0.05; sun.scale.setScalar(s); sunGlow.scale.setScalar(5.6 * s);
     bodies.forEach((b) => {
-      const ang = b.ph + t * b.spd;
+      const ang = b.ph + (reduced ? 0 : t * b.spd);
       const px = Math.cos(ang) * b.R, py = Math.sin(ang) * b.R;
       b.body.position.set(px, py, 0);
       b.bglow.position.set(px, py, 0);
       b.label.position.set(px, py + 0.4, 0);
     });
+    controls.update();
     renderer.render(scene, camera);
-    if (!reduced) raf = requestAnimationFrame(loop);
+    raf = requestAnimationFrame(loop);
   }
   raf = requestAnimationFrame(loop);
   window.addEventListener("resize", resize);
@@ -299,6 +335,7 @@ export function buildArmillary(canvas: HTMLCanvasElement, fleet: FleetAgent[]): 
     dispose() {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", resize);
+      controls.dispose();
       renderer.dispose();
       scene.traverse((o) => {
         const any = o as unknown as { geometry?: THREE.BufferGeometry; material?: THREE.Material | THREE.Material[] };
