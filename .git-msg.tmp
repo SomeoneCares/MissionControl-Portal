@@ -1,16 +1,17 @@
-Fix HTTP 400 when sending an attachment-only chat message
+Fix agent toolset toggle for nested disabled_toolsets
 
-Pasting an image with no caption failed with "No user message found in
-input": the runs API reads input as messages, but we sent raw content parts
-with no role wrapper, and an empty caption left the text part blank.
+Hermes profiles keep disabled_toolsets nested under agent: (indented), but the
+reader and rewriter only matched a top-level key. As a result reading returned
+an empty list and enabling/disabling a toolset was a silent no-op (it wrote the
+file back unchanged).
 
-- Wrap multimodal turns in a proper user message (role + content parts) so the
-  gateway finds the user message.
-- Supply a neutral prompt ("Please take a look at the attached image." /
-  "Please review the attached file.") when the caption is empty, so an
-  attachment-only turn still carries user text.
+- _disabled_toolsets: match the key at any indent and collect items indented
+  deeper than the key, so the nested list is read correctly.
+- _rewrite_disabled_toolsets: preserve the key's indentation and the existing
+  item indentation when replacing the block, and emit "disabled_toolsets: []"
+  when the list becomes empty instead of dropping the key.
 
-Note: whether the agent can actually read the image depends on the selected
-model being vision-capable; a text-only model will say it can't see images.
+Verified against pt-scanner: the Skills tab now reads the real list and the
+enable/disable round-trip edits the nested block in place.
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>

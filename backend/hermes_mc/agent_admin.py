@@ -249,17 +249,23 @@ class AgentAdmin:
             lines = cfg.read_text(encoding="utf-8").splitlines()
         except OSError:
             return []
-        out, in_block = [], False
+        # `disabled_toolsets:` may sit at the top level or nested under `agent:` (indented).
+        # Match it at any indent, then collect the list items indented deeper than the key.
+        out: list[str] = []
+        key_indent: int | None = None
         for line in lines:
-            if re.match(r"^disabled_toolsets\s*:", line):
-                in_block = True
+            m = re.match(r"^(\s*)disabled_toolsets\s*:(.*)$", line)
+            if m and key_indent is None:
+                key_indent = len(m.group(1))
                 continue
-            if in_block:
-                m = re.match(r"^\s*-\s*(.+?)\s*$", line)
-                if m:
-                    out.append(m.group(1).strip().strip("\"'"))
-                elif line.strip() and not line.startswith((" ", "\t")):
-                    break
+            if key_indent is not None:
+                item = re.match(r"^(\s*)-\s*(.+?)\s*$", line)
+                if item and len(item.group(1)) > key_indent:
+                    out.append(item.group(2).strip().strip("\"'"))
+                elif line.strip() == "":
+                    continue
+                else:
+                    break  # a line at or above the key's indent ends the block
         return out
 
     def set_toolset(self, agent: str, toolset: str, enabled: bool) -> dict:
@@ -310,23 +316,38 @@ def _redact(text: str) -> str:
 
 
 def _rewrite_disabled_toolsets(text: str, disabled: list[str]) -> str:
-    """Replace (or append) the top-level ``disabled_toolsets:`` list with ``disabled``."""
+    """Replace the ``disabled_toolsets:`` list with ``disabled``, preserving the key's
+    location and indentation (it is nested under ``agent:`` in Hermes profiles)."""
     lines = text.splitlines()
     out: list[str] = []
     i, replaced = 0, False
     while i < len(lines):
         line = lines[i]
-        if re.match(r"^disabled_toolsets\s*:", line):
+        m = re.match(r"^(\s*)disabled_toolsets\s*:", line)
+        if m and not replaced:
             replaced = True
+            key_indent = m.group(1)
+            # keep the existing item indentation if there is one, else key + 2 spaces
+            item_indent = key_indent + "  "
+            j = i + 1
+            while j < len(lines):
+                im = re.match(r"^(\s*)-\s*", lines[j])
+                if im:
+                    item_indent = im.group(1)
+                    break
+                if lines[j].strip() == "":
+                    j += 1
+                    continue
+                break
             if disabled:
-                out.append("disabled_toolsets:")
-                out.extend(f"- {t}" for t in disabled)
+                out.append(f"{key_indent}disabled_toolsets:")
+                out.extend(f"{item_indent}- {t}" for t in disabled)
+            else:
+                out.append(f"{key_indent}disabled_toolsets: []")
             i += 1
-            while i < len(lines):  # skip the old list items
-                if re.match(r"^\s*-\s*", lines[i]) or (lines[i].strip() == ""):
+            while i < len(lines):  # skip the old key's list items (and interleaved blanks)
+                if re.match(r"^\s*-\s*", lines[i]) or lines[i].strip() == "":
                     i += 1
-                    if lines[i - 1].strip() == "" and i < len(lines) and not re.match(r"^\s*-", lines[i]):
-                        break
                 else:
                     break
             continue
