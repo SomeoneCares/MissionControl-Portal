@@ -34,6 +34,7 @@ from .board import Board
 from .content import ContentStore, ContentError
 from .kanban import KanbanSource, KanbanError
 from .connections import ConnectionRegistry
+from .fleets import FleetGroups
 from .gateway import GatewayClient, GatewayError
 from .local_source import LocalSource
 
@@ -359,10 +360,26 @@ class Handler(BaseHTTPRequestHandler):
 
     def _connection_id(self) -> str:
         qs = parse_qs(urlparse(self.path).query)
-        # new param/header, with the legacy "fleet"/"X-Fleet" spelling still accepted
-        q = qs.get("connection", [""])[0] or qs.get("fleet", [""])[0]
-        return (q or self.headers.get("X-Connection") or self.headers.get("X-Fleet")
-                or "primary")
+        q = qs.get("connection", [""])[0]
+        return q or self.headers.get("X-Connection") or "primary"
+
+    # profile-group "fleets", one FleetGroups per connection project dir (cached across requests)
+    _fleet_groups: dict[str, FleetGroups] = {}
+
+    def _fleets(self) -> FleetGroups:
+        pd = self.provider.cfg.project_dir if self.provider else self.project_dir
+        key = str(pd)
+        fg = Handler._fleet_groups.get(key)
+        if fg is None:
+            fg = FleetGroups(pd)
+            Handler._fleet_groups[key] = fg
+        return fg
+
+    def _profiles(self) -> list[str]:
+        try:
+            return [a.get("agent") for a in (self.provider.state().get("fleet") or []) if a.get("agent")]
+        except Exception:
+            return []
 
     # -- auth -------------------------------------------------------------
 
@@ -507,8 +524,8 @@ class Handler(BaseHTTPRequestHandler):
             self.provider = self.registry.provider(self._connection_id())
         if path == "/api/connections":
             return self._json({"connections": self.registry.list(), "current": self._connection_id()})
-        if path == "/api/fleets":   # back-compat alias (old bundle / old key)
-            return self._json({"fleets": self.registry.list(), "current": self._connection_id()})
+        if path == "/api/fleets":
+            return self._json(self._fleets().view(self._profiles()))
         if path == "/api/branding":
             return self._json(_read_branding(self.project_dir))
         if path == "/api/health":
@@ -598,13 +615,28 @@ class Handler(BaseHTTPRequestHandler):
             return self._handle_password_change(body)
         if self.registry is not None:
             self.provider = self.registry.provider(self._connection_id())
-        if path in ("/api/connections", "/api/fleets"):   # /api/fleets: back-compat alias
+        if path == "/api/connections":
             try:
                 return self._json(self.registry.add(body).public())
             except ValueError as e:
                 return self._json({"error": str(e)}, status=400)
-        if path in ("/api/connections/remove", "/api/fleets/remove"):
+        if path == "/api/connections/remove":
             return self._json({"removed": self.registry.remove(body.get("id", ""))})
+        # profile-group fleets (portal-side metadata over the selected connection's profiles)
+        if path == "/api/fleets":
+            try:
+                return self._json(self._fleets().create(body.get("name", ""), body.get("accent", "")))
+            except ValueError as e:
+                return self._json({"error": str(e)}, status=400)
+        if path == "/api/fleets/update":
+            try:
+                return self._json(self._fleets().update(body.get("id", ""), body.get("name"), body.get("accent")))
+            except ValueError as e:
+                return self._json({"error": str(e)}, status=400)
+        if path == "/api/fleets/assign":
+            return self._json(self._fleets().assign(body.get("profile", ""), body.get("fleet", "")))
+        if path == "/api/fleets/remove":
+            return self._json({"removed": self._fleets().remove(body.get("id", ""))})
         if path == "/api/branding":
             try:
                 return self._json(_write_branding(self.project_dir, body))

@@ -46,6 +46,17 @@ export interface ConnectionInfo {
   id: string; name: string; accent: string; mode: string; primary: boolean; gateway: boolean;
 }
 
+export interface FleetGroup {
+  id: string; name: string; accent: string;
+  members: string[];        // profile names assigned to this fleet (may include ones not live)
+  live_members?: string[];  // members currently present on the connection
+}
+export interface FleetGroupsView {
+  fleets: FleetGroup[];
+  ungrouped: string[];      // live profiles not in any fleet
+  profiles: string[];       // all live profiles on the connection
+}
+
 export interface AuthStatus {
   authed: boolean;
   required: boolean;
@@ -87,6 +98,14 @@ export const api = {
   branding: () => getJSON<{ name: string; accent: string }>("/api/branding"),
   setBranding: (spec: { name: string; accent: string }) =>
     postJSON<{ name: string; accent: string }>("/api/branding", spec),
+  // profile-group "fleets" — portal-side grouping over the selected connection's profiles
+  fleets: () => getJSON<FleetGroupsView>("/api/fleets"),
+  createFleet: (spec: { name: string; accent?: string }) => postJSON<FleetGroup>("/api/fleets", spec),
+  updateFleet: (id: string, patch: { name?: string; accent?: string }) =>
+    postJSON<FleetGroup>("/api/fleets/update", { id, ...patch }),
+  assignFleet: (profile: string, fleet: string) =>
+    postJSON<{ ok: boolean; error?: string }>("/api/fleets/assign", { profile, fleet }),
+  removeFleet: (id: string) => postJSON<{ removed: boolean }>("/api/fleets/remove", { id }),
   connections: () => getJSON<{ connections: ConnectionInfo[]; current: string }>("/api/connections"),
   addConnection: (spec: { name: string; accent?: string; bridge_url?: string; bridge_key?: string; gateway_url?: string; gateway_key?: string }) =>
     postJSON<ConnectionInfo>("/api/connections", spec),

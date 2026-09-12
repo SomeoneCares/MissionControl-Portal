@@ -629,6 +629,21 @@
 .td-comment-body { font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 .td-body { background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 10px 12px; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; margin: 0; }
 
+/* ===== fleets (profile groups) ===== */
+.fleet-group { display: flex; flex-direction: column; gap: 12px; }
+.fleet-group-head { display: flex; align-items: center; gap: 10px; padding: 2px 0; }
+.fleet-swatch { width: 12px; height: 12px; border-radius: 50%; flex: none; background: var(--ember); }
+.fleet-swatch.ungrouped { background: var(--muted); }
+.fleet-group-name { font-size: 15px; font-weight: 500; }
+.fleet-group-count { font-size: 11px; }
+/* management rows */
+.fleet-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.fleet-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); }
+.fleet-accent { width: 30px; height: 30px; border: 1px solid var(--line); border-radius: 8px; background: none; cursor: pointer; padding: 0; flex: none; }
+.fleet-name-input { flex: 1; min-width: 0; }
+.fleet-count { flex: none; white-space: nowrap; }
+.fleet-select-inline { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--ground); color: var(--ink); font-size: 12px; }
+
 /* =========================================================================
    MOBILE / NARROW-VIEWPORT LAYOUT
    The desktop chrome assumes a wide row: the topbar packs brand + 9 tabs +

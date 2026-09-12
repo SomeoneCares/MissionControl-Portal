@@ -1,20 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { State, Agent } from "../types";
-import { api, type ModelOption, type AgentFile } from "../api/client";
+import { api, type ModelOption, type AgentFile, type FleetGroup, type FleetGroupsView } from "../api/client";
 
 // Agents — one card per agent the server reports, any number. Detail drawer on click.
-// Fleet capabilities (toolsets) come from the gateway; per-agent vitals from /api/state.
+// Cards are grouped into fleets (portal-side profile groups); toolsets come from the gateway.
 
 export function Agents({ state }: { state: State }) {
   const [selected, setSelected] = useState<Agent | null>(null);
   const [toolsets, setToolsets] = useState<string[] | null>(null);
   const [creating, setCreating] = useState(false);
+  const [groups, setGroups] = useState<FleetGroupsView | null>(null);
 
+  const reloadGroups = () => api.fleets().then(setGroups).catch(() => setGroups(null));
   useEffect(() => {
-    // Toolsets are a fleet-wide capability, read from the gateway via the backend (fleet-aware).
+    // Toolsets are a connection-wide capability, read from the gateway via the backend.
     api.toolsets()
       .then((d) => setToolsets((d.data ?? []).map((t: { name: string }) => t.name)))
       .catch(() => setToolsets([]));
+    reloadGroups();
   }, []);
 
   const totalRuns = state.fleet.reduce((s, a) => s + a.tasksToday, 0);
@@ -22,6 +25,33 @@ export function Agents({ state }: { state: State }) {
     state.fleet.length > 0
       ? (state.fleet.reduce((s, a) => s + a.success, 0) / state.fleet.length).toFixed(1)
       : "—";
+
+  // group live agents by fleet (fleet order, then Ungrouped)
+  const byName = new Map(state.fleet.map((a) => [a.agent, a]));
+  const fleetSections = (groups?.fleets ?? [])
+    .map((f) => ({ fleet: f, agents: f.members.map((m) => byName.get(m)).filter(Boolean) as Agent[] }))
+    .filter((s) => s.agents.length > 0);
+  const grouped = new Set(fleetSections.flatMap((s) => s.agents.map((a) => a.agent)));
+  const ungrouped = state.fleet.filter((a) => !grouped.has(a.agent));
+  const hasGroups = fleetSections.length > 0;
+
+  const renderCard = (a: Agent) => (
+    <button key={a.agent} className="agent-card card" onClick={() => setSelected(a)}>
+      <div className="agent-card-top">
+        <span className="ini big">{a.initials}</span>
+        <span className={`state-chip ${a.state.toLowerCase()}`}>{a.state}</span>
+      </div>
+      <div className="agent-card-name">{a.name}</div>
+      <div className="mono muted agent-card-role">{a.role || a.agent}</div>
+      <div className="agent-card-foot">
+        <span className="mono agent-card-model">{a.defaultModel || "model unset"}</span>
+        <span className="mono tabular muted">{a.tasksToday} runs · {a.success}%</span>
+      </div>
+      <div className="share-track">
+        <div className="share-fill" style={{ width: `${a.share}%` }} />
+      </div>
+    </button>
+  );
 
   return (
     <div className="agents">
@@ -48,6 +78,8 @@ export function Agents({ state }: { state: State }) {
 
       {creating && <CreateAgentModal onClose={() => setCreating(false)} />}
 
+      <FleetsManager groups={groups} reload={reloadGroups} />
+
       {toolsets && toolsets.length > 0 && (
         <section className="card">
           <span className="eyebrow">Fleet capabilities · toolsets</span>
@@ -59,28 +91,115 @@ export function Agents({ state }: { state: State }) {
         </section>
       )}
 
-      <section className="agent-grid">
-        {state.fleet.map((a) => (
-          <button key={a.agent} className="agent-card card" onClick={() => setSelected(a)}>
-            <div className="agent-card-top">
-              <span className="ini big">{a.initials}</span>
-              <span className={`state-chip ${a.state.toLowerCase()}`}>{a.state}</span>
-            </div>
-            <div className="agent-card-name">{a.name}</div>
-            <div className="mono muted agent-card-role">{a.role || a.agent}</div>
-            <div className="agent-card-foot">
-              <span className="mono agent-card-model">{a.defaultModel || "model unset"}</span>
-              <span className="mono tabular muted">{a.tasksToday} runs · {a.success}%</span>
-            </div>
-            <div className="share-track">
-              <div className="share-fill" style={{ width: `${a.share}%` }} />
-            </div>
-          </button>
-        ))}
-      </section>
+      {hasGroups ? (
+        <>
+          {fleetSections.map((s) => (
+            <section key={s.fleet.id} className="fleet-group">
+              <div className="fleet-group-head">
+                <span className="fleet-swatch" style={{ background: s.fleet.accent || "var(--ember)" }} />
+                <span className="fleet-group-name">{s.fleet.name}</span>
+                <span className="mono muted fleet-group-count">{s.agents.length}</span>
+              </div>
+              <div className="agent-grid">{s.agents.map(renderCard)}</div>
+            </section>
+          ))}
+          {ungrouped.length > 0 && (
+            <section className="fleet-group">
+              <div className="fleet-group-head">
+                <span className="fleet-swatch ungrouped" />
+                <span className="fleet-group-name">Ungrouped</span>
+                <span className="mono muted fleet-group-count">{ungrouped.length}</span>
+              </div>
+              <div className="agent-grid">{ungrouped.map(renderCard)}</div>
+            </section>
+          )}
+        </>
+      ) : (
+        <section className="agent-grid">{state.fleet.map(renderCard)}</section>
+      )}
 
-      {selected && <AgentDrawer agent={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <AgentDrawer
+          agent={selected}
+          fleets={groups?.fleets ?? []}
+          onFleetChange={reloadGroups}
+          onClose={() => setSelected(null)}
+        />
+      )}
     </div>
+  );
+}
+
+function FleetsManager({ groups, reload }: { groups: FleetGroupsView | null; reload: () => void }) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [accent, setAccent] = useState("#1db4d8");
+  const [msg, setMsg] = useState<string | null>(null);
+  const fleets = groups?.fleets ?? [];
+
+  const create = async () => {
+    if (!name.trim()) return;
+    try {
+      await api.createFleet({ name: name.trim(), accent });
+      setName(""); setAdding(false); setMsg(null); reload();
+    } catch (e) { setMsg(String(e)); }
+  };
+
+  return (
+    <section className="card settings-block">
+      <div className="block-head">
+        <span className="eyebrow block-title">Fleets · profile groups</span>
+        <button className="btn-primary" onClick={() => setAdding((v) => !v)}>{adding ? "Cancel" : "+ New fleet"}</button>
+      </div>
+      <p className="mono muted block-note">
+        Group this connection's profiles into named fleets. These are portal-only labels — profiles,
+        skills and memory are never changed. Each profile belongs to one fleet; the rest are Ungrouped.
+      </p>
+      {adding && (
+        <div className="add-conn">
+          <div className="set-field"><label>Name</label>
+            <input className="add-input" value={name} autoFocus placeholder="e.g. Pentest"
+                   onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && create()} />
+          </div>
+          <div className="set-field"><label>Accent</label>
+            <input type="color" value={accent} onChange={(e) => setAccent(e.target.value)} />
+          </div>
+          {msg && <p className="pane-msg mono">{msg}</p>}
+          <button className="btn-primary" onClick={create} disabled={!name.trim()}>Create fleet</button>
+        </div>
+      )}
+      {fleets.length === 0 ? (
+        <p className="empty-block mono">No fleets yet — create one, or they'll be suggested from profile name prefixes.</p>
+      ) : (
+        <ul className="fleet-list">
+          {fleets.map((f) => <FleetRow key={f.id} fleet={f} reload={reload} />)}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function FleetRow({ fleet, reload }: { fleet: FleetGroup; reload: () => void }) {
+  const [name, setName] = useState(fleet.name);
+  const [accent, setAccent] = useState(fleet.accent || "#1db4d8");
+  const timer = useRef<number | null>(null);
+  const count = fleet.live_members?.length ?? fleet.members.length;
+
+  const saveName = () => { if (name.trim() && name !== fleet.name) api.updateFleet(fleet.id, { name: name.trim() }).then(reload).catch(() => {}); };
+  const onName = (v: string) => {
+    setName(v);
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => { if (v.trim()) api.updateFleet(fleet.id, { name: v.trim() }).then(reload).catch(() => {}); }, 600);
+  };
+  const onAccent = (v: string) => { setAccent(v); api.updateFleet(fleet.id, { accent: v }).then(reload).catch(() => {}); };
+
+  return (
+    <li className="fleet-item">
+      <input type="color" className="fleet-accent" value={/^#/.test(accent) ? accent : "#1db4d8"} onChange={(e) => onAccent(e.target.value)} title="Accent colour" />
+      <input className="add-input fleet-name-input" value={name} onChange={(e) => onName(e.target.value)} onBlur={saveName} />
+      <span className="mono muted fleet-count">{count} {count === 1 ? "profile" : "profiles"}</span>
+      <button className="content-tool danger" onClick={async () => { await api.removeFleet(fleet.id).catch(() => {}); reload(); }}>Decommission</button>
+    </li>
   );
 }
 
@@ -147,7 +266,8 @@ function CreateAgentModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function AgentDrawer({ agent, onClose }: { agent: Agent; onClose: () => void }) {
+function AgentDrawer({ agent, fleets, onFleetChange, onClose }:
+  { agent: Agent; fleets: FleetGroup[]; onFleetChange: () => void; onClose: () => void }) {
   const [tab, setTab] = useState<DrawerTab>("profile");
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -175,7 +295,7 @@ function AgentDrawer({ agent, onClose }: { agent: Agent; onClose: () => void }) 
           ))}
         </div>
 
-        {tab === "profile" && <ProfilePane agent={agent} />}
+        {tab === "profile" && <ProfilePane agent={agent} fleets={fleets} onFleetChange={onFleetChange} />}
         {tab === "model" && <ModelPane agent={agent} />}
         {tab === "skills" && <SkillsPane agent={agent} />}
         {tab === "files" && <FilesPane agent={agent} />}
@@ -184,7 +304,17 @@ function AgentDrawer({ agent, onClose }: { agent: Agent; onClose: () => void }) 
   );
 }
 
-function ProfilePane({ agent }: { agent: Agent }) {
+function ProfilePane({ agent, fleets, onFleetChange }:
+  { agent: Agent; fleets: FleetGroup[]; onFleetChange: () => void }) {
+  const currentFleet = fleets.find((f) => f.members.includes(agent.agent))?.id ?? "";
+  const [busy, setBusy] = useState(false);
+  const assign = async (fleetId: string) => {
+    setBusy(true);
+    try { await api.assignFleet(agent.agent, fleetId); } catch { /* keep UI responsive */ }
+    setBusy(false);
+    onFleetChange();
+  };
+
   return (
     <>
       <div className="drawer-stats">
@@ -199,6 +329,13 @@ function ProfilePane({ agent }: { agent: Agent }) {
       </div>
       <dl className="drawer-fields">
         <div><dt>Profile</dt><dd className="mono">{agent.agent}</dd></div>
+        <div><dt>Fleet</dt><dd>
+          <select className="fleet-select-inline mono" value={currentFleet} disabled={busy}
+                  onChange={(e) => assign(e.target.value)}>
+            <option value="">Ungrouped</option>
+            {fleets.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+        </dd></div>
         <div><dt>Model</dt><dd className="mono">{agent.defaultModel || "—"}</dd></div>
         <div><dt>Provider</dt><dd className="mono">{agent.provider || "—"}</dd></div>
         <div><dt>Workload share</dt><dd className="mono">{agent.share}%</dd></div>
