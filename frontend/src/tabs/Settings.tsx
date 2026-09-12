@@ -1,19 +1,19 @@
 import { useEffect, useState } from "react";
 import type { HealthInfo } from "../types";
-import { api, setFleet, getFleet, type FleetInfo, type ContentDirInfo } from "../api/client";
+import { api, setConnection, getConnection, type ConnectionInfo, type ContentDirInfo } from "../api/client";
 import { settings, applySettings, ACCENT_PRESETS } from "../store/settings";
 
-// Settings — branding (name, accent, theme), connected fleets, and connection info. Branding is
-// per-viewer (localStorage). Fleets are portal-owned and shared.
+// Settings — branding (name, accent, theme), connected Hermes hosts, and connection info. Branding
+// is per-viewer (localStorage). Connections are portal-owned and shared.
 
 export function Settings({ health }: { health: HealthInfo | null }) {
   const [s, setS] = useState(settings.get());
-  const [fleets, setFleets] = useState<FleetInfo[]>([]);
+  const [connections, setConnections] = useState<ConnectionInfo[]>([]);
   const [adding, setAdding] = useState(false);
 
   useEffect(() => settings.subscribe(() => setS(settings.get())), []);
-  const reloadFleets = () => api.fleets().then((d) => setFleets(d.fleets)).catch(() => setFleets([]));
-  useEffect(() => { reloadFleets(); }, []);
+  const reloadConnections = () => api.connections().then((d) => setConnections(d.connections)).catch(() => setConnections([]));
+  useEffect(() => { reloadConnections(); }, []);
 
   return (
     <div className="settings">
@@ -64,28 +64,28 @@ export function Settings({ health }: { health: HealthInfo | null }) {
       {/* access / credentials */}
       <CredentialsBlock />
 
-      {/* fleets */}
+      {/* connections (Hermes hosts) */}
       <section className="card settings-block">
         <div className="block-head">
-          <span className="eyebrow block-title">Fleets</span>
-          <button className="btn-primary" onClick={() => setAdding((v) => !v)}>{adding ? "Cancel" : "+ Add fleet"}</button>
+          <span className="eyebrow block-title">Connections</span>
+          <button className="btn-primary" onClick={() => setAdding((v) => !v)}>{adding ? "Cancel" : "+ Add connection"}</button>
         </div>
         <p className="mono muted block-note">
-          Connect other Hermes hosts. Give a fleet a bridge (for the dashboard data) and/or a gateway
-          (for chat) — a bridge-less fleet is chat-only, a gateway-less one is read-only.
+          Connect other Hermes hosts. Give a connection a bridge (for the dashboard data) and/or a
+          gateway (for chat) — a bridge-less connection is chat-only, a gateway-less one is read-only.
         </p>
-        {adding && <AddFleet onDone={() => { setAdding(false); reloadFleets(); }} />}
-        <ul className="fleet-list">
-          {fleets.map((f) => (
-            <li key={f.id} className={`fleet-item ${f.id === getFleet() ? "current" : ""}`}>
-              <span className="fleet-swatch" style={{ background: f.accent || "var(--ember)" }} />
-              <div className="fleet-meta">
-                <span className="fleet-name">{f.name}{f.primary && <span className="fleet-tag">primary</span>}</span>
-                <span className="mono muted fleet-sub">{f.mode}{f.gateway ? " · chat" : ""}</span>
+        {adding && <AddConnection onDone={() => { setAdding(false); reloadConnections(); }} />}
+        <ul className="conn-list">
+          {connections.map((c) => (
+            <li key={c.id} className={`conn-item ${c.id === getConnection() ? "current" : ""}`}>
+              <span className="conn-swatch" style={{ background: c.accent || "var(--ember)" }} />
+              <div className="conn-meta">
+                <span className="conn-name">{c.name}{c.primary && <span className="conn-tag">primary</span>}</span>
+                <span className="mono muted conn-sub">{c.mode}{c.gateway ? " · chat" : ""}</span>
               </div>
-              <div className="fleet-actions">
-                <button className="content-tool" onClick={() => { setFleet(f.id); location.reload(); }}>View</button>
-                {!f.primary && <button className="content-tool danger" onClick={async () => { await api.removeFleet(f.id); reloadFleets(); }}>Remove</button>}
+              <div className="conn-actions">
+                <button className="content-tool" onClick={() => { setConnection(c.id); location.reload(); }}>View</button>
+                {!c.primary && <button className="content-tool danger" onClick={async () => { await api.removeConnection(c.id); reloadConnections(); }}>Remove</button>}
               </div>
             </li>
           ))}
@@ -101,7 +101,7 @@ export function Settings({ health }: { health: HealthInfo | null }) {
         <dl className="conn-fields">
           <div><dt>Mode</dt><dd className="mono">{health?.mode ?? "—"}</dd></div>
           <div><dt>Gateway</dt><dd className="mono">{health?.gateway ? `${health.gateway.ok ? "live" : "down"} · v${health.gateway.version || "—"} · ${health.gateway.latency_ms}ms` : "not configured"}</dd></div>
-          <div><dt>Current fleet</dt><dd className="mono">{getFleet()}</dd></div>
+          <div><dt>Current connection</dt><dd className="mono">{getConnection()}</dd></div>
         </dl>
         <button className="content-tool" onClick={() => { settings.set({ portalName: "", accent: "", theme: "system" }); applySettings(); }}>Reset branding</button>
       </section>
@@ -249,7 +249,7 @@ function ContentDirBlock() {
   );
 }
 
-function AddFleet({ onDone }: { onDone: () => void }) {
+function AddConnection({ onDone }: { onDone: () => void }) {
   const [f, setF] = useState({ name: "", accent: "#1db4d8", bridge_url: "", bridge_key: "", gateway_url: "", gateway_key: "" });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -259,11 +259,11 @@ function AddFleet({ onDone }: { onDone: () => void }) {
     if (!f.name.trim()) { setMsg("Name is required."); return; }
     if (!f.bridge_url && !f.gateway_url) { setMsg("Give a bridge URL, a gateway URL, or both."); return; }
     setBusy(true); setMsg(null);
-    try { await api.addFleet(f); onDone(); } catch (e) { setMsg(String(e)); setBusy(false); }
+    try { await api.addConnection(f); onDone(); } catch (e) { setMsg(String(e)); setBusy(false); }
   };
 
   return (
-    <div className="add-fleet">
+    <div className="add-conn">
       <div className="set-field"><label>Name</label><input className="add-input" value={f.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Prod Hermes" /></div>
       <div className="set-grid">
         <div className="set-field"><label>Bridge URL</label><input className="add-input mono" value={f.bridge_url} onChange={(e) => set("bridge_url", e.target.value)} placeholder="http://host:51772" /></div>
@@ -273,7 +273,7 @@ function AddFleet({ onDone }: { onDone: () => void }) {
       </div>
       <div className="set-field"><label>Accent</label><input type="color" value={f.accent} onChange={(e) => set("accent", e.target.value)} /></div>
       {msg && <p className="pane-msg mono">{msg}</p>}
-      <button className="btn-primary" onClick={submit} disabled={busy}>{busy ? "Adding…" : "Add fleet"}</button>
+      <button className="btn-primary" onClick={submit} disabled={busy}>{busy ? "Adding…" : "Add connection"}</button>
     </div>
   );
 }

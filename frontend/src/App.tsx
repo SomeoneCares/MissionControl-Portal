@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { State, HealthInfo } from "./types";
-import { api, subscribeState, setFleet, getFleet, type FleetInfo } from "./api/client";
+import { api, subscribeState, setConnection, getConnection, type ConnectionInfo } from "./api/client";
 import { settings, applySettings } from "./store/settings";
 import { Overview } from "./tabs/Overview";
 import { Agents } from "./tabs/Agents";
@@ -22,10 +22,13 @@ export function App() {
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const [tab, setTab] = useState<Tab>("Overview");
   const [error, setError] = useState<string | null>(null);
-  const [fleets, setFleets] = useState<FleetInfo[]>([]);
+  const [connections, setConnections] = useState<ConnectionInfo[]>([]);
   const [brand, setBrand] = useState(settings.get().portalName);
   // null = still checking; true = show app; false = show login gate.
   const [authed, setAuthed] = useState<boolean | null>(null);
+  // mobile hamburger menu (no effect at desktop widths — the CSS only collapses
+  // the tab bar below the mobile breakpoint).
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     applySettings();
@@ -41,7 +44,7 @@ export function App() {
     if (authed !== true) return;
     api.health().then(setHealth).catch((e) => setError(String(e)));
     api.state().then(setState).catch((e) => setError(String(e)));
-    api.fleets().then((d) => setFleets(d.fleets)).catch(() => setFleets([]));
+    api.connections().then((d) => setConnections(d.connections)).catch(() => setConnections([]));
     const stop = subscribeState(setState);
     return () => { stop(); };
   }, [authed]);
@@ -51,16 +54,24 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="topbar">
+      <header className={`topbar ${menuOpen ? "menu-open" : ""}`}>
         <div className="brand">
           <span className="dot" />
           <span className="display brand-name">{brand || "Hermes"}</span>
           <span className="mono brand-sub">Mission Control</span>
         </div>
-        {fleets.length > 1 && (
-          <select className="fleet-select mono" value={getFleet()}
-                  onChange={(e) => { setFleet(e.target.value); location.reload(); }}>
-            {fleets.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+        <button
+          className="hamburger"
+          aria-label={menuOpen ? "Close menu" : "Open menu"}
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((v) => !v)}
+        >
+          <span /><span /><span />
+        </button>
+        {connections.length > 1 && (
+          <select className="conn-select mono" value={getConnection()}
+                  onChange={(e) => { setConnection(e.target.value); location.reload(); }}>
+            {connections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         )}
         <nav className="tabs">
@@ -68,7 +79,7 @@ export function App() {
             <button
               key={t}
               className={`tab ${t === tab ? "active" : ""}`}
-              onClick={() => setTab(t)}
+              onClick={() => { setTab(t); setMenuOpen(false); }}
             >
               {t}
             </button>

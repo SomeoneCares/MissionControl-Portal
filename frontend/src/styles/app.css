@@ -19,6 +19,9 @@
 .tab.active { color: var(--ground); background: var(--ink); border-color: var(--ink); }
 .topbar-right { margin-left: auto; }
 
+/* hamburger: hidden at desktop widths; the mobile block below reveals it */
+.hamburger { display: none; }
+
 /* content */
 .content { max-width: 1180px; margin: 0 auto; padding: 22px 24px 60px; }
 .loading, .placeholder { padding: 60px 0; text-align: center; color: var(--muted); }
@@ -497,8 +500,8 @@
 .tp-fill { height: 100%; background: linear-gradient(90deg, var(--ember-soft), var(--ember)); border-radius: 999px; }
 .tp-count { font-size: 11px; color: var(--muted); }
 
-/* ===== fleet selector ===== */
-.fleet-select { padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); font-size: 11px; letter-spacing: 0.04em; }
+/* ===== connection selector ===== */
+.conn-select { padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink); font-size: 11px; letter-spacing: 0.04em; }
 
 /* ===== settings ===== */
 .settings { display: flex; flex-direction: column; gap: 16px; max-width: 760px; }
@@ -523,16 +526,16 @@
 .seg { display: inline-flex; gap: 2px; padding: 3px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; width: fit-content; }
 .seg-btn { padding: 6px 16px; border-radius: 999px; border: none; background: transparent; color: var(--muted); cursor: pointer; font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
 .seg-btn.active { background: var(--ink); color: var(--ground); }
-.fleet-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.fleet-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); }
-.fleet-item.current { border-color: var(--ember); }
-.fleet-swatch { width: 12px; height: 12px; border-radius: 50%; flex: none; }
-.fleet-meta { flex: 1; display: flex; flex-direction: column; }
-.fleet-name { font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
-.fleet-tag { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ember); border: 1px solid var(--ember); border-radius: 999px; padding: 1px 6px; }
-.fleet-sub { font-size: 10px; }
-.fleet-actions { display: flex; gap: 4px; }
-.add-fleet { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px dashed var(--line); border-radius: var(--radius); background: var(--panel-2); }
+.conn-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.conn-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); }
+.conn-item.current { border-color: var(--ember); }
+.conn-swatch { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.conn-meta { flex: 1; display: flex; flex-direction: column; }
+.conn-name { font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+.conn-tag { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ember); border: 1px solid var(--ember); border-radius: 999px; padding: 1px 6px; }
+.conn-sub { font-size: 10px; }
+.conn-actions { display: flex; gap: 4px; }
+.add-conn { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px dashed var(--line); border-radius: var(--radius); background: var(--panel-2); }
 .conn-fields { margin: 0; display: flex; flex-direction: column; }
 .conn-fields > div { display: flex; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid var(--line-soft); }
 .conn-fields > div:last-child { border-bottom: none; }
@@ -625,3 +628,92 @@
 .td-comment-author { color: var(--ember); }
 .td-comment-body { font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 .td-body { background: var(--panel-2); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 10px 12px; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; margin: 0; }
+
+/* =========================================================================
+   MOBILE / NARROW-VIEWPORT LAYOUT
+   The desktop chrome assumes a wide row: the topbar packs brand + 9 tabs +
+   status pill + sign-out on one line, and every page header sets a 40–52px
+   display heading `space-between` against a stat cluster. Below ~760px those
+   rows have nowhere to go, so we: turn the tab bar into a horizontal swipe
+   strip, stack each header vertically, and step the oversized display type
+   down to a phone scale. Grid collapses already handled inline above.
+   ========================================================================= */
+@media (max-width: 760px) {
+  /* --- top bar: compact row (brand + hamburger); everything else collapses
+     into a dropdown that only takes space once the menu is opened. --- */
+  .topbar { flex-wrap: wrap; gap: 10px 14px; padding: 11px 14px; }
+  .brand { order: 1; }
+  .hamburger {
+    order: 2; margin-left: auto; display: inline-flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    width: 40px; height: 40px; padding: 0; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2);
+  }
+  .hamburger span { display: block; width: 18px; height: 2px; border-radius: 2px; background: var(--ink); transition: transform 0.18s ease, opacity 0.18s ease; }
+  .topbar.menu-open .hamburger span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+  .topbar.menu-open .hamburger span:nth-child(2) { opacity: 0; }
+  .topbar.menu-open .hamburger span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+  /* the collapsible pieces: hidden until the menu opens */
+  .conn-select { order: 3; flex-basis: 100%; display: none; }
+  .tabs { order: 4; flex-basis: 100%; width: 100%; display: none; flex-direction: column; gap: 3px; }
+  .topbar-right { order: 5; flex-basis: 100%; width: 100%; display: none; margin-left: 0; }
+
+  .topbar.menu-open .conn-select { display: block; }
+  .topbar.menu-open .tabs { display: flex; }
+  .topbar.menu-open .topbar-right {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding-top: 10px; margin-top: 2px; border-top: 1px solid var(--line);
+  }
+  /* full-width, left-aligned menu rows instead of pills */
+  .tab { flex: none; width: 100%; text-align: left; border-radius: var(--radius); padding: 11px 14px; font-size: 12px; }
+  .tab.active { color: var(--ground); background: var(--ink); }
+
+  /* --- page gutters --- */
+  .content { padding: 16px 14px 48px; }
+
+  /* --- collapse every header row from side-by-side to stacked --- */
+  .agents-head, .tasks-head, .runs-head, .sched-head, .content-head,
+  .office-head, .chat-head, .health-card-head, .hero, .block-head {
+    flex-direction: column; align-items: flex-start; gap: 12px;
+  }
+  .hero-side, .office-controls { align-items: flex-start; width: 100%; }
+
+  /* stat clusters: keep them a row, but left-aligned under the heading */
+  .agents-head-stats { gap: 22px; }
+  .agents-head-stats > div, .runs-stat { text-align: left; }
+  .runs-stats { gap: 20px; }
+
+  /* --- step the display type down to a phone scale --- */
+  .hero-title { font-size: 32px; }
+  .hero-lede { font-size: 13px; }
+  .agents-title, .tasks-title, .runs-title, .sched-title,
+  .content-title, .office-title, .settings-title { font-size: 27px; }
+  .chat-title { font-size: 25px; }
+  .stat-num { font-size: 40px; }
+  .head-stat { font-size: 26px; }
+  .runs-stat-num { font-size: 24px; }
+  .tile-num { font-size: 32px; }
+  .health-title { font-size: 21px; }
+
+  /* --- misc rows that overflow when narrow --- */
+  .add-row { flex-wrap: wrap; }
+  .add-input { flex-basis: 100%; }
+  .health-strip { grid-template-columns: 1fr; gap: 14px; }
+  .ledger-foot { grid-template-columns: repeat(2, 1fr); }
+  .runs-table-card { overflow-x: auto; }        /* let the wide runs table scroll, not clip */
+  .bubble { max-width: 90%; }
+  .chat-messages { max-height: 62vh; }
+  .office-stage { height: 54vh; min-height: 340px; }
+  .office-dossier { width: min(220px, 70vw); }
+}
+
+/* very small phones: tighten the largest type one more step */
+@media (max-width: 430px) {
+  .hero-title { font-size: 27px; }
+  .agents-title, .tasks-title, .runs-title, .sched-title,
+  .content-title, .office-title, .settings-title { font-size: 23px; }
+  .chat-title { font-size: 22px; }
+  .stat-num { font-size: 34px; }
+  .brand-name { font-size: 19px; }
+}

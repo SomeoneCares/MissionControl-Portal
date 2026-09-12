@@ -32,7 +32,7 @@ from .agent_admin import AgentAdmin, AdminError
 from .board import Board
 from .content import ContentStore, ContentError
 from .kanban import KanbanSource, KanbanError
-from .fleets import FleetRegistry
+from .connections import ConnectionRegistry
 from .gateway import GatewayClient, GatewayError
 from .local_source import LocalSource
 
@@ -320,17 +320,20 @@ _OPEN_PATHS = {"/api/health", "/api/auth/login", "/api/auth/status", "/api/auth/
 
 
 class Handler(BaseHTTPRequestHandler):
-    provider: DataProvider = None   # per-request, resolved from the selected fleet
-    registry: FleetRegistry = None
+    provider: DataProvider = None   # per-request, resolved from the selected connection
+    registry: ConnectionRegistry = None
     dist_dir: Path = None
     auth: "config_mod.PortalAuth" = None   # sign-in credentials (from cfg.auth)
     project_dir: Path = None               # where credential changes are persisted
 
     server_version = "HermesMC/0.1"
 
-    def _fleet_id(self) -> str:
-        q = parse_qs(urlparse(self.path).query).get("fleet", [""])[0]
-        return q or self.headers.get("X-Fleet") or "primary"
+    def _connection_id(self) -> str:
+        qs = parse_qs(urlparse(self.path).query)
+        # new param/header, with the legacy "fleet"/"X-Fleet" spelling still accepted
+        q = qs.get("connection", [""])[0] or qs.get("fleet", [""])[0]
+        return (q or self.headers.get("X-Connection") or self.headers.get("X-Fleet")
+                or "primary")
 
     # -- auth -------------------------------------------------------------
 
@@ -472,9 +475,11 @@ class Handler(BaseHTTPRequestHandler):
                 "editable": bool(self.auth and not self.auth.from_env),
             })
         if self.registry is not None:
-            self.provider = self.registry.provider(self._fleet_id())
-        if path == "/api/fleets":
-            return self._json({"fleets": self.registry.list(), "current": self._fleet_id()})
+            self.provider = self.registry.provider(self._connection_id())
+        if path == "/api/connections":
+            return self._json({"connections": self.registry.list(), "current": self._connection_id()})
+        if path == "/api/fleets":   # back-compat alias (old bundle / old key)
+            return self._json({"fleets": self.registry.list(), "current": self._connection_id()})
         if path == "/api/health":
             h = self.provider.gateway.health() if self.provider.gateway else None
             return self._json({
@@ -561,13 +566,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/auth/password":
             return self._handle_password_change(body)
         if self.registry is not None:
-            self.provider = self.registry.provider(self._fleet_id())
-        if path == "/api/fleets":
+            self.provider = self.registry.provider(self._connection_id())
+        if path in ("/api/connections", "/api/fleets"):   # /api/fleets: back-compat alias
             try:
                 return self._json(self.registry.add(body).public())
             except ValueError as e:
                 return self._json({"error": str(e)}, status=400)
-        if path == "/api/fleets/remove":
+        if path in ("/api/connections/remove", "/api/fleets/remove"):
             return self._json({"removed": self.registry.remove(body.get("id", ""))})
         try:
             if path == "/api/board":
@@ -679,9 +684,15 @@ class Handler(BaseHTTPRequestHandler):
         atts = body.get("attachments") or []
         text_atts = [a for a in atts if a.get("kind") == "text" and a.get("text")]
         img_atts = [a for a in atts if a.get("kind") == "image" and a.get("dataUrl")]
+        file_atts = [a for a in atts if a.get("kind") == "file" and a.get("dataUrl")]
         if text_atts:
             base_text += "\n\n" + "\n\n".join(
                 f"[Attached file: {a.get('name', 'file')}]\n{a['text']}" for a in text_atts)
+        if file_atts:
+            base_text += "\n\n" + "\n\n".join(
+                f"[Attached file: {a.get('name', 'file')} — converted to structured Markdown]\n"
+                + extract_attachment_markdown(a.get("name", "file"), a["dataUrl"])
+                for a in file_atts)
         # The runs API needs a non-empty user message. An attachment-only turn (e.g. a pasted
         # image with no caption) would otherwise send a blank text part and be rejected with
         # "No user message found in input" — supply a neutral prompt in that case.
@@ -819,6 +830,78 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
+_PANDOC_DOC_EXTS = {".docx", ".odt", ".rtf", ".html", ".htm", ".epub", ".md",
+                    ".markdown", ".rst", ".org", ".tex", ".fb2", ".docbook"}
+
+
+def _decode_data_url(data_url: str) -> bytes:
+    b64 = data_url.split(",", 1)[1] if "," in data_url else data_url
+    return base64.b64decode(b64)
+
+
+def extract_attachment_markdown(name: str, data_url: str, max_chars: int = 200_000) -> str:
+    """Convert an uploaded file to structured Markdown — headings, tables, lists and
+    reading order preserved — so the model sees the document's organization, not
+    flattened text. PDF -> pymupdf4llm; office/doc formats -> pandoc; text/code kept
+    as-is. Degrades gracefully with a note when an extractor is missing or fails."""
+    ext = os.path.splitext(name)[1].lower()
+    try:
+        raw = _decode_data_url(data_url)
+    except Exception as e:  # noqa: BLE001
+        return f"_(could not decode {name}: {e})_"
+    if len(raw) > 25 * 1024 * 1024:
+        return f"_({name} is too large to analyze)_"
+
+    def _clip(s: str) -> str:
+        s = (s or "").strip()
+        return s if len(s) <= max_chars else s[:max_chars] + "\n\n_(truncated)_"
+
+    if ext == ".pdf":
+        try:
+            import pymupdf, pymupdf4llm  # type: ignore
+            doc = pymupdf.open(stream=raw, filetype="pdf")
+            return _clip(pymupdf4llm.to_markdown(doc)) or \
+                f"_(no extractable content in {name} — may be a scanned/image PDF)_"
+        except Exception:  # noqa: BLE001 - fall back to flat text
+            try:
+                import io, pypdf  # type: ignore
+                r = pypdf.PdfReader(io.BytesIO(raw))
+                txt = "\n\n".join((p.extract_text() or "") for p in r.pages)
+                return _clip(txt) or f"_(no extractable text in {name})_"
+            except Exception as e2:  # noqa: BLE001
+                return f"_(PDF analysis failed for {name}: {e2})_"
+
+    if ext in _PANDOC_DOC_EXTS:
+        try:
+            import subprocess, tempfile
+            src_fmt = {".htm": "html", ".html": "html", ".md": "markdown",
+                       ".markdown": "markdown"}.get(ext, ext.lstrip("."))
+            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
+                f.write(raw)
+                tmp = f.name
+            try:
+                out = subprocess.run(["pandoc", "-f", src_fmt, "-t", "gfm", tmp],
+                                     capture_output=True, text=True, timeout=45)
+            finally:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+            if out.returncode == 0 and out.stdout.strip():
+                return _clip(out.stdout)
+            return f"_(could not convert {name}: {(out.stderr or '').strip()[:160]})_"
+        except Exception as e:  # noqa: BLE001
+            return f"_(document conversion unavailable for {name}: {e})_"
+
+    # plain text / code / data — inline as-is
+    for enc in ("utf-8", "latin-1"):
+        try:
+            return _clip(raw.decode(enc))
+        except UnicodeDecodeError:
+            continue
+    return f"_({name}: unsupported binary type — no extractor available)_"
+
+
 def _content_type(suffix: str) -> str:
     return {
         ".html": "text/html; charset=utf-8", ".htm": "text/html; charset=utf-8",
@@ -833,7 +916,7 @@ def _content_type(suffix: str) -> str:
 
 
 def make_server(cfg: config_mod.Config) -> ThreadingHTTPServer:
-    registry = FleetRegistry(cfg, lambda c: DataProvider(c))
+    registry = ConnectionRegistry(cfg, lambda c: DataProvider(c))
     dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
     Handler.registry = registry
     Handler.provider = registry.provider("primary")

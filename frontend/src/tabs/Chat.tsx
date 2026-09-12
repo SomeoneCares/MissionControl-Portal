@@ -29,16 +29,20 @@ const TEXT_EXT = /\.(md|markdown|txt|json|csv|tsv|ya?ml|toml|ini|log|xml|html?|c
 async function readAttachment(file: File): Promise<Attachment | null> {
   const isImage = file.type.startsWith("image/");
   const isText = file.type.startsWith("text/") || file.type === "application/json" || TEXT_EXT.test(file.name);
-  if (!isImage && !isText) return null;
+  if (file.size > 20 * 1024 * 1024) return null; // 20 MB cap — base64 stays under the 32 MB request-body limit
   return new Promise((resolve) => {
     const r = new FileReader();
     r.onerror = () => resolve(null);
     if (isImage) {
       r.onload = () => resolve({ name: file.name, kind: "image", size: file.size, dataUrl: String(r.result) });
       r.readAsDataURL(file);
-    } else {
+    } else if (isText) {
       r.onload = () => resolve({ name: file.name, kind: "text", size: file.size, text: String(r.result) });
       r.readAsText(file);
+    } else {
+      // PDF, Office docs, etc — send the bytes; the backend converts to structured Markdown.
+      r.onload = () => resolve({ name: file.name, kind: "file", size: file.size, dataUrl: String(r.result) });
+      r.readAsDataURL(file);
     }
   });
 }
@@ -73,7 +77,7 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
     const ok = read.filter((a): a is Attachment => a !== null);
     const skipped = arr.length - ok.length;
     if (ok.length) setDraft((d) => [...d, ...ok]);
-    setAttachMsg(skipped > 0 ? `${skipped} file(s) skipped — only text files and images are supported.` : null);
+    setAttachMsg(skipped > 0 ? `${skipped} file(s) skipped — each file must be under 20 MB.` : null);
   };
 
   const onPaste = (e: React.ClipboardEvent) => {

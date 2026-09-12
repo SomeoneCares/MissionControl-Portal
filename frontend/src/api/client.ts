@@ -3,28 +3,31 @@
 
 import type { State, HealthInfo, BoardTask, KanbanTask, TaskStage } from "../types";
 
-// the selected fleet is appended to every request; "primary" is the portal's own host.
-// Persisted so the choice survives the page reload that the fleet switcher triggers to apply it.
-const FLEET_KEY = "hermes-mc-fleet";
-let fleetId = (() => { try { return localStorage.getItem(FLEET_KEY) || "primary"; } catch { return "primary"; } })();
-export function setFleet(id: string) {
-  fleetId = id || "primary";
-  try { localStorage.setItem(FLEET_KEY, fleetId); } catch { /* private mode */ }
+// the selected connection (Hermes host) is appended to every request; "primary" is the portal's
+// own host. Persisted so the choice survives the page reload the connection switcher triggers.
+const CONNECTION_KEY = "hermes-mc-connection";
+let connId = (() => {
+  try { return localStorage.getItem(CONNECTION_KEY) || localStorage.getItem("hermes-mc-fleet") || "primary"; }
+  catch { return "primary"; }
+})();
+export function setConnection(id: string) {
+  connId = id || "primary";
+  try { localStorage.setItem(CONNECTION_KEY, connId); } catch { /* private mode */ }
 }
-export function getFleet() { return fleetId; }
-export function withFleet(path: string): string {
-  if (fleetId === "primary") return path;
-  return path + (path.includes("?") ? "&" : "?") + "fleet=" + encodeURIComponent(fleetId);
+export function getConnection() { return connId; }
+export function withConnection(path: string): string {
+  if (connId === "primary") return path;
+  return path + (path.includes("?") ? "&" : "?") + "connection=" + encodeURIComponent(connId);
 }
 
 async function getJSON<T>(path: string): Promise<T> {
-  const res = await fetch(withFleet(path), { headers: { Accept: "application/json" } });
+  const res = await fetch(withConnection(path), { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
   return res.json() as Promise<T>;
 }
 
 async function postJSON<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(withFleet(path), {
+  const res = await fetch(withConnection(path), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -39,7 +42,7 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export interface FleetInfo {
+export interface ConnectionInfo {
   id: string; name: string; accent: string; mode: string; primary: boolean; gateway: boolean;
 }
 
@@ -81,10 +84,10 @@ export const api = {
     postJSON<{ ok: boolean }>("/api/runs/steer", { run, text, agent }),
   approve: (run: string, choice: string, agent: string | null, request_id?: string) =>
     postJSON<{ ok: boolean }>("/api/runs/approval", { run, choice, agent, request_id }),
-  fleets: () => getJSON<{ fleets: FleetInfo[]; current: string }>("/api/fleets"),
-  addFleet: (spec: { name: string; accent?: string; bridge_url?: string; bridge_key?: string; gateway_url?: string; gateway_key?: string }) =>
-    postJSON<FleetInfo>("/api/fleets", spec),
-  removeFleet: (id: string) => postJSON<{ removed: boolean }>("/api/fleets/remove", { id }),
+  connections: () => getJSON<{ connections: ConnectionInfo[]; current: string }>("/api/connections"),
+  addConnection: (spec: { name: string; accent?: string; bridge_url?: string; bridge_key?: string; gateway_url?: string; gateway_key?: string }) =>
+    postJSON<ConnectionInfo>("/api/connections", spec),
+  removeConnection: (id: string) => postJSON<{ removed: boolean }>("/api/connections/remove", { id }),
   schedule: () => getJSON<{ jobs: CronJob[] }>("/api/schedule"),
   tasks: () => getJSON<{ tasks: KanbanTask[]; stages: TaskStage[]; editable: boolean }>("/api/tasks"),
   taskDetail: (id: string) => getJSON<TaskDetail>(`/api/tasks/detail?id=${encodeURIComponent(id)}`),
@@ -101,8 +104,8 @@ export const api = {
   contentCreate: (agent: string, title: string) =>
     postJSON<{ ok: boolean; path: string }>("/api/content/create", { agent, title }),
   contentDelete: (p: string) => postJSON<{ ok: boolean }>("/api/content/delete", { path: p }),
-  contentDownloadUrl: (p: string) => withFleet(`/api/content/download?path=${encodeURIComponent(p)}`),
-  contentWordUrl: (p: string) => withFleet(`/api/content/word?path=${encodeURIComponent(p)}`),
+  contentDownloadUrl: (p: string) => withConnection(`/api/content/download?path=${encodeURIComponent(p)}`),
+  contentWordUrl: (p: string) => withConnection(`/api/content/word?path=${encodeURIComponent(p)}`),
   createAgent: (spec: { name: string; role?: string; model?: string; provider?: string }) =>
     postJSON<{ ok: boolean; agent: string; name: string }>("/api/agents/create", spec),
   agentSkills: (agent: string) =>
@@ -246,10 +249,10 @@ export interface ChatHandlers {
 
 export interface Attachment {
   name: string;
-  kind: "text" | "image";
+  kind: "text" | "image" | "file";
   size: number;
   text?: string;     // for text files: the content
-  dataUrl?: string;  // for images: a data: URL
+  dataUrl?: string;  // for images and files (PDF/docx/…): a base64 data: URL; the backend extracts structured Markdown
 }
 
 // Stream a real agent turn to a specific agent (profile) via the runs API. Surfaces the agent's
@@ -263,7 +266,7 @@ export function chatStream(
   const ctrl = new AbortController();
   (async () => {
     try {
-      const res = await fetch(withFleet("/api/chat"), {
+      const res = await fetch(withConnection("/api/chat"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages, agent, attachments: attachments ?? [] }),
@@ -325,7 +328,7 @@ export function subscribeState(onState: (s: State) => void): () => void {
   };
 
   try {
-    es = new EventSource(withFleet("/events"));
+    es = new EventSource(withConnection("/events"));
     es.addEventListener("state", (e) => {
       try {
         onState(JSON.parse((e as MessageEvent).data));
