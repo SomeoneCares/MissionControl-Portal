@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, type ContentDoc } from "../api/client";
+import { api, type ContentDoc, type FleetGroupsView } from "../api/client";
 
-// Content — everything the fleet has written. Browse by author agent, read text documents,
-// download the binary ones (PDF, Word) that agents also produce.
+// Content — everything the fleet has written. Browse by author agent (grouped by the author's
+// fleet), read text documents, download the binary ones (PDF, Word) that agents also produce.
 
 const TEXT_KINDS = new Set(["md", "txt", "html", "htm", "csv", "json", "log", ""]);
 const isTextDoc = (d: ContentDoc) => TEXT_KINDS.has((d.kind ?? "md").toLowerCase());
@@ -10,6 +10,7 @@ const isMarkdown = (d: ContentDoc) => (d.kind ?? "md").toLowerCase() === "md";
 
 export function Content() {
   const [docs, setDocs] = useState<ContentDoc[] | null>(null);
+  const [groups, setGroups] = useState<FleetGroupsView | null>(null);
   const [agent, setAgent] = useState("all");
   const [open, setOpen] = useState<ContentDoc | null>(null);
   const [body, setBody] = useState<string>("");
@@ -20,12 +21,28 @@ export function Content() {
 
   const reload = () => api.content().then((d) => setDocs(d.docs));
   useEffect(() => { reload(); }, []);
+  useEffect(() => { api.fleets().then(setGroups).catch(() => setGroups(null)); }, []);
 
   const agents = useMemo(
     () => ["all", ...Array.from(new Set((docs ?? []).map((d) => d.agent).filter(Boolean)))],
     [docs],
   );
   const list = (docs ?? []).filter((d) => agent === "all" || d.agent === agent);
+
+  // group the doc list by the author's fleet (only when not already narrowed to one author)
+  const docSections: { name: string; accent: string; docs: ContentDoc[] }[] | null =
+    agent === "all" && (groups?.fleets.length ?? 0) > 0
+      ? [
+          ...groups!.fleets.map((f) => ({
+            name: f.name, accent: f.accent,
+            docs: list.filter((d) => d.agent && f.members.includes(d.agent)),
+          })),
+          {
+            name: "Ungrouped", accent: "",
+            docs: list.filter((d) => !d.agent || !groups!.fleets.some((f) => f.members.includes(d.agent))),
+          },
+        ].filter((s) => s.docs.length > 0)
+      : null;
 
   const openDoc = async (d: ContentDoc) => {
     setOpen(d); setBody(""); setEditing(false); setMsg(null);
@@ -57,6 +74,20 @@ export function Content() {
     } catch (e) { setMsg(String(e)); }
   };
 
+  const renderDocItem = (d: ContentDoc) => (
+    <li key={d.path}>
+      <button className={`content-item ${open?.path === d.path ? "active" : ""}`} onClick={() => openDoc(d)}>
+        <span className="content-item-title">
+          {d.title}
+          {d.kind && d.kind !== "md" && <span className="content-kind mono">{d.kind}</span>}
+        </span>
+        <span className="mono muted content-item-meta">
+          {d.agent || "—"} · {new Date(d.modified_at).toLocaleDateString()}
+        </span>
+      </button>
+    </li>
+  );
+
   return (
     <div className="content-tab">
       <section className="content-head card">
@@ -84,21 +115,21 @@ export function Content() {
                 <button key={a} className={`filter-btn ${a === agent ? "active" : ""}`} onClick={() => setAgent(a)}>{a}</button>
               ))}
             </div>
-            <ul className="content-list">
-              {list.map((d) => (
-                <li key={d.path}>
-                  <button className={`content-item ${open?.path === d.path ? "active" : ""}`} onClick={() => openDoc(d)}>
-                    <span className="content-item-title">
-                      {d.title}
-                      {d.kind && d.kind !== "md" && <span className="content-kind mono">{d.kind}</span>}
-                    </span>
-                    <span className="mono muted content-item-meta">
-                      {d.agent || "—"} · {new Date(d.modified_at).toLocaleDateString()}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            {docSections ? (
+              docSections.map((sec) => (
+                <div key={sec.name} className="content-group">
+                  <div className="content-group-head">
+                    <span className={`fleet-swatch ${sec.name === "Ungrouped" ? "ungrouped" : ""}`}
+                          style={sec.name === "Ungrouped" ? undefined : { background: sec.accent || "var(--ember)" }} />
+                    <span className="mono content-group-name">{sec.name}</span>
+                    <span className="mono muted content-group-count">{sec.docs.length}</span>
+                  </div>
+                  <ul className="content-list">{sec.docs.map(renderDocItem)}</ul>
+                </div>
+              ))
+            ) : (
+              <ul className="content-list">{list.map(renderDocItem)}</ul>
+            )}
           </aside>
           <section className="content-reader card">
             {!open ? (

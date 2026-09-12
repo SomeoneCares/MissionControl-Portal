@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { State, Agent } from "../types";
+import { api, type FleetGroupsView } from "../api/client";
 import { buildArmillary, type SceneController, type FleetAgent } from "../office/scene";
 import { buildSkyline } from "../office/skyline";
 import { settings } from "../store/settings";
@@ -13,10 +14,12 @@ export function Office({ state }: { state: State }) {
   const [view, setView] = useState<View>("skyline");
   const [selected, setSelected] = useState<string | null>(null);
   const [accent, setAccent] = useState(settings.get().accent);
+  const [groups, setGroups] = useState<FleetGroupsView | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctrlRef = useRef<SceneController | null>(null);
 
   useEffect(() => settings.subscribe(() => setAccent(settings.get().accent)), []);
+  useEffect(() => { api.fleets().then(setGroups).catch(() => setGroups(null)); }, []);
 
   const fleet: FleetAgent[] = state.fleet.map((a) => ({
     agent: a.agent, initials: a.initials, name: a.name, role: a.role,
@@ -36,6 +39,7 @@ export function Office({ state }: { state: State }) {
   const execN = state.fleet.filter((a) => ["EXECUTING", "PROCESSING_NOW", "TASK_IN_PROGRESS"].includes(a.state)).length;
   const assignedN = state.fleet.filter((a) => ["ASSIGNED", "TASK_ASSIGNED"].includes(a.state)).length;
   const dossier: Agent | undefined = selected ? state.fleet.find((a) => a.agent === selected) : undefined;
+  const dossierFleet = dossier ? groups?.fleets.find((f) => f.members.includes(dossier.agent)) : undefined;
 
   return (
     <div className="office">
@@ -75,6 +79,11 @@ export function Office({ state }: { state: State }) {
             <div className="display dossier-name">{dossier.name}</div>
             <div className="mono muted dossier-role">{dossier.role || dossier.agent}</div>
             <dl className="dossier-fields">
+              <div><dt>Fleet</dt><dd className="mono dossier-fleet">
+                <span className={`fleet-swatch ${dossierFleet ? "" : "ungrouped"}`}
+                      style={dossierFleet ? { background: dossierFleet.accent || "var(--ember)" } : undefined} />
+                {dossierFleet ? dossierFleet.name : "Ungrouped"}
+              </dd></div>
               <div><dt>Model</dt><dd className="mono">{dossier.defaultModel || "—"}</dd></div>
               <div><dt>Runs today</dt><dd className="mono">{dossier.tasksToday}</dd></div>
               <div><dt>Success</dt><dd className="mono">{dossier.success}%</dd></div>

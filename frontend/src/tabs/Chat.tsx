@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { State, HealthInfo, Agent } from "../types";
-import { api, chatStream, type ChatMessage, type ChatAgents, type ToolEvent, type Attachment, type ApprovalChoice, type SubagentEvent } from "../api/client";
+import { api, chatStream, type ChatMessage, type ChatAgents, type ToolEvent, type Attachment, type ApprovalChoice, type SubagentEvent, type FleetGroupsView } from "../api/client";
 import { chatStore, type Turn } from "../store/chatStore";
 
 // Approval choices arrive as bare strings (Hermes) or objects (older paths). Normalise both to a
@@ -62,6 +62,7 @@ const aborts: Record<string, () => void> = {};
 
 export function Chat({ state, health }: { state: State; health: HealthInfo | null }) {
   const [info, setInfo] = useState<ChatAgents | null>(null);
+  const [groups, setGroups] = useState<FleetGroupsView | null>(null);
   const [current, setCurrent] = useState<string>(DEFAULT_KEY);
   const threads = useSyncExternalStore(chatStore.subscribe, chatStore.snapshot);
   const [input, setInput] = useState("");
@@ -100,6 +101,8 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
     if (gatewayUp) api.chatAgents().then(setInfo).catch(() => setInfo(null));
   }, [gatewayUp]);
 
+  useEffect(() => { api.fleets().then(setGroups).catch(() => setGroups(null)); }, []);
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [threads, current]);
@@ -128,6 +131,46 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
   const turns = threads[current] ?? [];
   const isBusy = isStreaming(current);
   const activeProfile = roster.find((r) => r.key === current)?.profile ?? null;
+
+  // group the roster by fleet (only when multiplexing shows the full profile roster)
+  type RosterEntry = (typeof roster)[number];
+  const rosterSections: { name: string; accent: string; items: RosterEntry[] }[] | null =
+    info?.multiplex && (groups?.fleets.length ?? 0) > 0
+      ? [
+          ...groups!.fleets.map((f) => ({
+            name: f.name,
+            accent: f.accent,
+            items: roster.filter((r) => r.profile && f.members.includes(r.profile)),
+          })),
+          {
+            name: "Ungrouped",
+            accent: "",
+            items: roster.filter((r) => !r.profile || !groups!.fleets.some((f) => f.members.includes(r.profile!))),
+          },
+        ].filter((s) => s.items.length > 0)
+      : null;
+
+  const renderRosterItem = (r: RosterEntry) => {
+    const a = r.profile ? fleetByName[r.profile] : null;
+    return (
+      <li key={r.key}>
+        <button
+          className={`roster-item ${r.key === current ? "active" : ""}`}
+          onClick={() => setCurrent(r.key)}
+        >
+          <span className="ini">{a ? a.initials : "GW"}</span>
+          <span className="roster-meta">
+            <span className="roster-name">{r.label}</span>
+            <span className="mono muted roster-sub">{r.sub}</span>
+          </span>
+          {isStreaming(r.key) && <span className="roster-busy" />}
+          {!isStreaming(r.key) && (threads[r.key]?.length ?? 0) > 0 && (
+            <span className="roster-count mono">{threads[r.key].length}</span>
+          )}
+        </button>
+      </li>
+    );
+  };
 
   const send = () => {
     const text = input.trim();
@@ -219,29 +262,20 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
           <span className="eyebrow roster-title">
             {info?.multiplex ? `Fleet · ${roster.length}` : "Agent"}
           </span>
-          <ul>
-            {roster.map((r) => {
-              const a = r.profile ? fleetByName[r.profile] : null;
-              return (
-                <li key={r.key}>
-                  <button
-                    className={`roster-item ${r.key === current ? "active" : ""}`}
-                    onClick={() => setCurrent(r.key)}
-                  >
-                    <span className="ini">{a ? a.initials : "GW"}</span>
-                    <span className="roster-meta">
-                      <span className="roster-name">{r.label}</span>
-                      <span className="mono muted roster-sub">{r.sub}</span>
-                    </span>
-                    {isStreaming(r.key) && <span className="roster-busy" />}
-                    {!isStreaming(r.key) && (threads[r.key]?.length ?? 0) > 0 && (
-                      <span className="roster-count mono">{threads[r.key].length}</span>
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+          {rosterSections ? (
+            rosterSections.map((sec) => (
+              <div key={sec.name} className="roster-group">
+                <div className="roster-group-head">
+                  <span className={`fleet-swatch ${sec.name === "Ungrouped" ? "ungrouped" : ""}`}
+                        style={sec.name === "Ungrouped" ? undefined : { background: sec.accent || "var(--ember)" }} />
+                  <span className="mono roster-group-name">{sec.name}</span>
+                </div>
+                <ul>{sec.items.map(renderRosterItem)}</ul>
+              </div>
+            ))
+          ) : (
+            <ul>{roster.map(renderRosterItem)}</ul>
+          )}
           {!info?.multiplex && (
             <p className="mono roster-note">
               Per-agent selection needs multiplexing enabled on the gateway.

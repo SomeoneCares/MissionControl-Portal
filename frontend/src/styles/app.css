@@ -643,6 +643,14 @@
 .fleet-name-input { flex: 1; min-width: 0; }
 .fleet-count { flex: none; white-space: nowrap; }
 .fleet-select-inline { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--ground); color: var(--ink); font-size: 12px; }
+/* fleet section headers inside the chat roster and content list */
+.roster-group + .roster-group, .content-group + .content-group { margin-top: 4px; }
+.roster-group-head, .content-group-head { display: flex; align-items: center; gap: 7px; padding: 9px 4px 4px; }
+.roster-group-head .fleet-swatch, .content-group-head .fleet-swatch { width: 9px; height: 9px; }
+.roster-group-name, .content-group-name { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.content-group-count { margin-left: auto; font-size: 9px; color: var(--muted); }
+.dossier-fleet { display: flex; align-items: center; gap: 6px; }
+.dossier-fleet .fleet-swatch { width: 9px; height: 9px; }
 
 /* =========================================================================
    MOBILE / NARROW-VIEWPORT LAYOUT
