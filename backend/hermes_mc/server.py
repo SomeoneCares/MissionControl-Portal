@@ -20,6 +20,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import secrets
 import time
 from http.cookies import SimpleCookie
@@ -319,6 +320,34 @@ _COOKIE = "hmc_session"
 _OPEN_PATHS = {"/api/health", "/api/auth/login", "/api/auth/status", "/api/auth/logout"}
 
 
+# -- portal branding (name + accent) — shared across all viewers/devices ---------------
+# Stored portal-side (not per-viewer localStorage) so every browser shows the same identity.
+# Theme stays per-device (a phone may want dark at night regardless of the laptop).
+_HEX_RE = re.compile(r"^#(?:[0-9a-fA-F]{6})$")
+
+
+def _read_branding(project_dir: Path) -> dict:
+    try:
+        data = json.loads((project_dir / "branding.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"name": "", "accent": ""}
+    name = str(data.get("name") or "")[:60]
+    accent = str(data.get("accent") or "")
+    if accent and not _HEX_RE.match(accent):
+        accent = ""
+    return {"name": name, "accent": accent}
+
+
+def _write_branding(project_dir: Path, spec: dict) -> dict:
+    name = str(spec.get("name") or "").strip()[:60]
+    accent = str(spec.get("accent") or "").strip()
+    if accent and not _HEX_RE.match(accent):
+        raise ValueError("accent must be a #RRGGBB hex colour or empty")
+    out = {"name": name, "accent": accent}
+    (project_dir / "branding.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     provider: DataProvider = None   # per-request, resolved from the selected connection
     registry: ConnectionRegistry = None
@@ -480,6 +509,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"connections": self.registry.list(), "current": self._connection_id()})
         if path == "/api/fleets":   # back-compat alias (old bundle / old key)
             return self._json({"fleets": self.registry.list(), "current": self._connection_id()})
+        if path == "/api/branding":
+            return self._json(_read_branding(self.project_dir))
         if path == "/api/health":
             h = self.provider.gateway.health() if self.provider.gateway else None
             return self._json({
@@ -574,6 +605,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)}, status=400)
         if path in ("/api/connections/remove", "/api/fleets/remove"):
             return self._json({"removed": self.registry.remove(body.get("id", ""))})
+        if path == "/api/branding":
+            try:
+                return self._json(_write_branding(self.project_dir, body))
+            except (ValueError, OSError) as e:
+                return self._json({"error": str(e)}, status=400)
         try:
             if path == "/api/board":
                 return self._json(self.provider.board.create(

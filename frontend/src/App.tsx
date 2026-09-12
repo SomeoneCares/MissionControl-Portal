@@ -45,6 +45,17 @@ export function App() {
     api.health().then(setHealth).catch((e) => setError(String(e)));
     api.state().then(setState).catch((e) => setError(String(e)));
     api.connections().then((d) => setConnections(d.connections)).catch(() => setConnections([]));
+    // Shared branding (name + accent) is portal-owned, so every device shows the same identity.
+    // If the server has none yet but this browser does (pre-shared-branding local settings), seed
+    // the server from it — a one-time migration from whichever device had the branding. Theme stays
+    // per-device and is never touched here.
+    api.branding().then((b) => {
+      if (b.name || b.accent) settings.set({ portalName: b.name, accent: b.accent });
+      else {
+        const s = settings.get();
+        if (s.portalName || s.accent) api.setBranding({ name: s.portalName, accent: s.accent }).catch(() => {});
+      }
+    }).catch(() => { /* offline / older backend: keep local branding */ });
     const stop = subscribeState(setState);
     return () => { stop(); };
   }, [authed]);

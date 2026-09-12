@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { HealthInfo } from "../types";
 import { api, setConnection, getConnection, type ConnectionInfo, type ContentDirInfo } from "../api/client";
 import { settings, applySettings, ACCENT_PRESETS } from "../store/settings";
 
-// Settings — branding (name, accent, theme), connected Hermes hosts, and connection info. Branding
-// is per-viewer (localStorage). Connections are portal-owned and shared.
+// Settings — branding (name, accent, theme), connected Hermes hosts, and connection info.
+// Name + accent are portal-owned and shared across devices (server-persisted); theme is per-viewer
+// (localStorage). Connections are portal-owned and shared.
 
 export function Settings({ health }: { health: HealthInfo | null }) {
   const [s, setS] = useState(settings.get());
@@ -14,6 +15,18 @@ export function Settings({ health }: { health: HealthInfo | null }) {
   useEffect(() => settings.subscribe(() => setS(settings.get())), []);
   const reloadConnections = () => api.connections().then((d) => setConnections(d.connections)).catch(() => setConnections([]));
   useEffect(() => { reloadConnections(); }, []);
+
+  // Name + accent are shared (portal-owned): mirror local edits to the server so every device
+  // picks them up. Theme is per-device and never pushed. Debounced for typing / colour-dragging.
+  const brandTimer = useRef<number | null>(null);
+  const pushBranding = () => {
+    const cur = settings.get();
+    api.setBranding({ name: cur.portalName, accent: cur.accent }).catch(() => {});
+  };
+  const pushBrandingDebounced = () => {
+    if (brandTimer.current) window.clearTimeout(brandTimer.current);
+    brandTimer.current = window.setTimeout(pushBranding, 500);
+  };
 
   return (
     <div className="settings">
@@ -30,7 +43,7 @@ export function Settings({ health }: { health: HealthInfo | null }) {
         <div className="set-field">
           <label>Portal name</label>
           <input className="add-input" placeholder="Hermes" value={s.portalName}
-                 onChange={(e) => settings.set({ portalName: e.target.value })} />
+                 onChange={(e) => { settings.set({ portalName: e.target.value }); pushBrandingDebounced(); }} />
         </div>
         <div className="set-field">
           <label>Accent colour</label>
@@ -38,7 +51,7 @@ export function Settings({ health }: { health: HealthInfo | null }) {
             {ACCENT_PRESETS.map((p) => (
               <button key={p.name}
                       className={`accent-chip ${s.accent === p.value ? "active" : ""}`}
-                      onClick={() => settings.set({ accent: p.value })}
+                      onClick={() => { settings.set({ accent: p.value }); pushBranding(); }}
                       title={p.name}>
                 <span className="accent-swatch" style={{ background: p.value || "var(--ember)" }} />
                 {p.name}
@@ -47,7 +60,7 @@ export function Settings({ health }: { health: HealthInfo | null }) {
             <label className="accent-custom">
               custom
               <input type="color" value={/^#/.test(s.accent) ? s.accent : "#1db4d8"}
-                     onChange={(e) => settings.set({ accent: e.target.value })} />
+                     onChange={(e) => { settings.set({ accent: e.target.value }); pushBrandingDebounced(); }} />
             </label>
           </div>
         </div>
@@ -103,7 +116,7 @@ export function Settings({ health }: { health: HealthInfo | null }) {
           <div><dt>Gateway</dt><dd className="mono">{health?.gateway ? `${health.gateway.ok ? "live" : "down"} · v${health.gateway.version || "—"} · ${health.gateway.latency_ms}ms` : "not configured"}</dd></div>
           <div><dt>Current connection</dt><dd className="mono">{getConnection()}</dd></div>
         </dl>
-        <button className="content-tool" onClick={() => { settings.set({ portalName: "", accent: "", theme: "system" }); applySettings(); }}>Reset branding</button>
+        <button className="content-tool" onClick={() => { settings.set({ portalName: "", accent: "", theme: "system" }); applySettings(); pushBranding(); }}>Reset branding</button>
       </section>
     </div>
   );

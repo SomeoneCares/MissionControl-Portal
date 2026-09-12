@@ -1,5 +1,7 @@
-// Portal settings — branding (name + accent colour), theme. Per-viewer, persisted to
-// localStorage, and applied to the document at runtime so the whole portal recolours live.
+// Portal settings — branding (name + accent colour), theme. Persisted to localStorage (per-viewer
+// cache) and applied to the document at runtime so the whole portal recolours live. Name + accent
+// are additionally mirrored to/from the server by App/Settings so they are shared across devices;
+// theme stays per-device. This store itself is local-only — the sharing is layered on top.
 
 const KEY = "hermes-mc-settings-v1";
 

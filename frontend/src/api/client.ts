@@ -84,6 +84,9 @@ export const api = {
     postJSON<{ ok: boolean }>("/api/runs/steer", { run, text, agent }),
   approve: (run: string, choice: string, agent: string | null, request_id?: string) =>
     postJSON<{ ok: boolean }>("/api/runs/approval", { run, choice, agent, request_id }),
+  branding: () => getJSON<{ name: string; accent: string }>("/api/branding"),
+  setBranding: (spec: { name: string; accent: string }) =>
+    postJSON<{ name: string; accent: string }>("/api/branding", spec),
   connections: () => getJSON<{ connections: ConnectionInfo[]; current: string }>("/api/connections"),
   addConnection: (spec: { name: string; accent?: string; bridge_url?: string; bridge_key?: string; gateway_url?: string; gateway_key?: string }) =>
     postJSON<ConnectionInfo>("/api/connections", spec),
