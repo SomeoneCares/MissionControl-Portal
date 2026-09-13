@@ -407,6 +407,36 @@
 .content-body a { color: var(--spot); }
 .content-body ul { padding-left: 20px; }
 
+/* ===== content: stat tiles, author rows, rendered document preview ===== */
+.content-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+@media (max-width: 760px) { .content-stats { grid-template-columns: 1fr; } }
+.stat-tile { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.stat-tile-num { font-size: 44px; line-height: 1; margin-top: 6px; }
+.stat-latest-title { font-size: 16px; margin-top: 6px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.stat-latest-sub { font-size: 10px; margin-top: 4px; }
+.chip-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: middle; }
+
+/* list rows with a colour-coded author avatar */
+.doc-row { display: flex; flex-direction: row; align-items: center; gap: 11px; }
+.doc-avatar { width: 30px; height: 30px; border-radius: 9px; flex: none; display: grid; place-items: center; color: #fff; font-family: var(--font-mono); font-size: 10px; font-weight: 600; }
+.doc-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 2px; }
+.doc-meta .content-item-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.doc-sub { font-size: 9px; letter-spacing: 0.03em; }
+.doc-badge { flex: none; }
+
+/* reader header identity */
+.reader-iden { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.doc-author-badge { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.08em; color: #fff; padding: 3px 8px; border-radius: 999px; flex: none; }
+.reader-title { font-size: 15px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* rendered page-image preview (PDF/DOCX/PPTX/XLSX) */
+.doc-preview { display: flex; flex-direction: column; gap: 12px; }
+.doc-preview-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-bottom: 4px; }
+.doc-preview-note { color: var(--muted); }
+.doc-original { text-decoration: none; }
+.doc-pages { display: flex; flex-direction: column; gap: 14px; align-items: center; max-height: 68vh; overflow-y: auto; padding: 8px; background: var(--panel-2); border-radius: var(--radius); }
+.doc-page { width: 100%; max-width: 720px; height: auto; border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,0.12); background: #fff; }
+
 /* ===== office ===== */
 .office { display: flex; flex-direction: column; gap: 16px; }
 .office-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; }

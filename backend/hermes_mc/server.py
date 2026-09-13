@@ -35,6 +35,7 @@ from .content import ContentStore, ContentError
 from .kanban import KanbanSource, KanbanError
 from .connections import ConnectionRegistry
 from .fleets import FleetGroups
+from . import content_preview
 from .gateway import GatewayClient, GatewayError
 from .local_source import LocalSource
 
@@ -425,6 +426,23 @@ class Handler(BaseHTTPRequestHandler):
                 return f["id"]
         return ""
 
+    def _content_abs(self, path: str):
+        """Resolve an encoded content path (<fleetid>::<rel> or <rel>) to a validated absolute file."""
+        if not self.provider or not self.provider.cfg.is_local:
+            return None
+        sid, rel = self._split_source(path)
+        root = self._root_for(sid)
+        if root is None:
+            return None
+        root_r = Path(root).resolve()
+        target = (root_r / rel).resolve()
+        if root_r not in (target, *target.parents):
+            return None
+        return target
+
+    def _preview_cache(self) -> Path:
+        return self.provider.cfg.project_dir / "cache" / "content-previews"
+
     # -- auth -------------------------------------------------------------
 
     def _session_id(self) -> str:
@@ -642,6 +660,47 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
             self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if path == "/api/content/preview":
+            raw = parse_qs(urlparse(self.path).query).get("path", [""])[0]
+            abs_ = self._content_abs(raw)
+            if abs_ is None or not abs_.exists():
+                return self._json({"supported": False, "reason": "document not found"}, status=404)
+            ok, reason = content_preview.supported_for(abs_.name)
+            if not ok:
+                return self._json({"supported": False, "reason": reason})
+            try:
+                imgs = content_preview.build(abs_, self._preview_cache())
+                return self._json({"supported": True, "pages": len(imgs),
+                                   "kind": abs_.suffix.lower().lstrip(".")})
+            except Exception as e:
+                return self._json({"supported": False, "reason": str(e)[:300]})
+        if path == "/api/content/preview/image":
+            q = parse_qs(urlparse(self.path).query)
+            raw = q.get("path", [""])[0]
+            try:
+                page = int(q.get("page", ["1"])[0])
+            except ValueError:
+                page = 1
+            abs_ = self._content_abs(raw)
+            if abs_ is None or not abs_.exists() or page < 1 or page > 100:
+                return self._json({"error": "not found"}, status=404)
+            ok, reason = content_preview.supported_for(abs_.name)
+            if not ok:
+                return self._json({"error": reason}, status=400)
+            try:
+                img = content_preview.page_file(abs_, self._preview_cache(), page)
+            except Exception as e:
+                return self._json({"error": str(e)[:300]}, status=500)
+            if not img or not img.exists():
+                return self._json({"error": "preview image not found"}, status=404)
+            data = img.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "private, max-age=300")
             self.end_headers()
             self.wfile.write(data)
             return

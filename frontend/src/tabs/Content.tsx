@@ -1,12 +1,39 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type ContentDoc, type FleetGroupsView } from "../api/client";
 
-// Content — everything the fleet has written. Browse by author agent (grouped by the author's
-// fleet), read text documents, download the binary ones (PDF, Word) that agents also produce.
+// Content — everything the fleet has written. Browse by author (colour-coded) or fleet, read text
+// documents inline, and preview binary ones (PDF/DOCX/PPTX/XLSX) as rendered page images with an
+// "Original" download of the source file.
 
 const TEXT_KINDS = new Set(["md", "txt", "html", "htm", "csv", "json", "log", ""]);
 const isTextDoc = (d: ContentDoc) => TEXT_KINDS.has((d.kind ?? "md").toLowerCase());
 const isMarkdown = (d: ContentDoc) => (d.kind ?? "md").toLowerCase() === "md";
+
+// a stable colour + initials per author, so agents read consistently across the list and chips
+function agentColor(a: string): string {
+  let h = 0;
+  for (let i = 0; i < a.length; i++) h = (h * 31 + a.charCodeAt(i)) >>> 0;
+  return `hsl(${h % 360} 52% 52%)`;
+}
+function agentInitials(a: string): string {
+  return (a || "—").replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase() || "—";
+}
+function relTime(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (!t) return "";
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  const d = Math.floor(s / 86400);
+  if (d > 0) return `${d}d ago`;
+  const h = Math.floor(s / 3600);
+  if (h > 0) return `${h}h ago`;
+  const m = Math.floor(s / 60);
+  return m > 0 ? `${m}m ago` : "just now";
+}
+function fmtSize(b: number): string {
+  return b >= 1024 ? `${(b / 1024).toFixed(1)} KB` : `${b} B`;
+}
+
+interface PreviewInfo { supported: boolean; pages: number; reason?: string; }
 
 export function Content() {
   const [docs, setDocs] = useState<ContentDoc[] | null>(null);
@@ -18,6 +45,7 @@ export function Content() {
   const [editing, setEditing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [preview, setPreview] = useState<PreviewInfo | null>(null);
 
   const reload = () => api.content().then((d) => setDocs(d.docs));
   useEffect(() => { reload(); }, []);
@@ -46,10 +74,15 @@ export function Content() {
       : null;
 
   const openDoc = async (d: ContentDoc) => {
-    setOpen(d); setBody(""); setEditing(false); setMsg(null);
-    if (!isTextDoc(d)) { setLoadingDoc(false); return; }  // binary (PDF/Word) — download only
+    setOpen(d); setBody(""); setEditing(false); setMsg(null); setPreview(null);
     setLoadingDoc(true);
-    try { const r = await api.contentRead(d.path); setBody(r.content); } catch { setBody("(failed to load)"); }
+    if (isTextDoc(d)) {
+      try { const r = await api.contentRead(d.path); setBody(r.content); } catch { setBody("(failed to load)"); }
+    } else {
+      // binary → ask for a rendered page-image preview; the server falls back to unsupported
+      try { setPreview(await api.contentPreview(d.path)); }
+      catch { setPreview({ supported: false, pages: 0, reason: "preview unavailable" }); }
+    }
     setLoadingDoc(false);
   };
 
@@ -77,14 +110,13 @@ export function Content() {
 
   const renderDocItem = (d: ContentDoc) => (
     <li key={d.path}>
-      <button className={`content-item ${open?.path === d.path ? "active" : ""}`} onClick={() => openDoc(d)}>
-        <span className="content-item-title">
-          {d.title}
-          {d.kind && d.kind !== "md" && <span className="content-kind mono">{d.kind}</span>}
+      <button className={`content-item doc-row ${open?.path === d.path ? "active" : ""}`} onClick={() => openDoc(d)}>
+        <span className="doc-avatar" style={{ background: agentColor(d.agent || "?") }} title={d.agent}>{agentInitials(d.agent)}</span>
+        <span className="doc-meta">
+          <span className="content-item-title">{d.title}</span>
+          <span className="mono muted doc-sub">{relTime(d.modified_at)} · {(d.kind || "md").toUpperCase()} · {fmtSize(d.size)}</span>
         </span>
-        <span className="mono muted content-item-meta">
-          {d.agent || "—"} · {new Date(d.modified_at).toLocaleDateString()}
-        </span>
+        <span className="content-kind mono doc-badge">{(d.kind || "md").toUpperCase()}</span>
       </button>
     </li>
   );
@@ -97,10 +129,27 @@ export function Content() {
           <h1 className="display content-title">The <span className="ember">library.</span></h1>
         </div>
         <div className="content-head-right">
-          <div className="runs-stat"><div className="display runs-stat-num tabular">{docs?.length ?? 0}</div><span className="eyebrow">documents</span></div>
           <button className="btn-primary" onClick={() => setCreating(true)}>+ New doc</button>
         </div>
       </section>
+
+      {docs && docs.length > 0 && (
+        <section className="content-stats">
+          <div className="card stat-tile">
+            <span className="eyebrow">Total docs</span>
+            <div className="display stat-tile-num tabular">{docs.length}</div>
+          </div>
+          <div className="card stat-tile">
+            <span className="eyebrow">Agents writing</span>
+            <div className="display stat-tile-num tabular">{new Set(docs.map((d) => d.agent).filter(Boolean)).size}</div>
+          </div>
+          <div className="card stat-tile stat-tile-latest">
+            <span className="eyebrow">Latest</span>
+            <div className="stat-latest-title">{docs[0].title}</div>
+            <span className="mono muted stat-latest-sub">{docs[0].agent || "—"} · {relTime(docs[0].modified_at)}</span>
+          </div>
+        </section>
+      )}
 
       {creating && <NewDocModal agents={agents} onClose={() => setCreating(false)} onCreate={createDoc} />}
 
@@ -113,7 +162,10 @@ export function Content() {
           <aside className="content-list-pane card">
             <div className="content-filter">
               {agents.map((a) => (
-                <button key={a} className={`filter-btn ${a === agent ? "active" : ""}`} onClick={() => setAgent(a)}>{a}</button>
+                <button key={a} className={`filter-btn ${a === agent ? "active" : ""}`} onClick={() => setAgent(a)}>
+                  {a !== "all" && <span className="chip-dot" style={{ background: agentColor(a) }} />}
+                  {a}
+                </button>
               ))}
             </div>
             {docSections ? (
@@ -140,7 +192,11 @@ export function Content() {
             ) : (
               <>
                 <div className="content-reader-head">
-                  <span className="mono muted">{open.agent} · {open.filename}</span>
+                  <div className="reader-iden">
+                    <span className="doc-author-badge" style={{ background: agentColor(open.agent || "?") }}>{(open.agent || "—").toUpperCase()}</span>
+                    <span className="content-kind mono">{(open.kind || "md").toUpperCase()}</span>
+                    <span className="reader-title">{open.title}</span>
+                  </div>
                   <div className="content-tools">
                     {editing ? (
                       <>
@@ -155,15 +211,35 @@ export function Content() {
                         <button className="content-tool danger" onClick={remove}>Delete</button>
                       </>
                     )}
+                    <button className="content-tool" onClick={() => setOpen(null)} aria-label="Close">✕</button>
                   </div>
                 </div>
                 {msg && <p className="pane-msg mono">{msg}</p>}
                 {!isTextDoc(open) ? (
-                  <div className="content-binary empty-block mono">
-                    {open.kind?.toUpperCase()} document · {(open.size / 1024).toFixed(0)} KB
-                    <br />
-                    <a className="content-tool" href={api.contentDownloadUrl(open.path)} download>Download to view</a>
-                  </div>
+                  preview?.supported ? (
+                    <div className="doc-preview">
+                      <div className="doc-preview-bar">
+                        <span className="mono muted">
+                          {(open.kind || "").toUpperCase()} PREVIEW · {preview.pages} {preview.pages === 1 ? "PAGE" : "PAGES"}
+                          <span className="doc-preview-note"> · rendered preview; download uses the original source file</span>
+                        </span>
+                        <a className="btn-primary doc-original" href={api.contentDownloadUrl(open.path)} download>↓ Original</a>
+                      </div>
+                      <div className="doc-pages">
+                        {Array.from({ length: preview.pages }, (_, i) => (
+                          <img key={i} className="doc-page" loading="lazy"
+                               src={api.contentPreviewImageUrl(open.path, i + 1)} alt={`page ${i + 1}`} />
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="content-binary empty-block mono">
+                      {(open.kind || "file").toUpperCase()} document · {fmtSize(open.size)}
+                      {preview?.reason && <><br /><span className="muted">{preview.reason}</span></>}
+                      <br />
+                      <a className="content-tool" href={api.contentDownloadUrl(open.path)} download>Download to view</a>
+                    </div>
+                  )
                 ) : editing ? (
                   <textarea className="content-editor mono" value={body} onChange={(e) => setBody(e.target.value)} spellCheck={false} />
                 ) : isMarkdown(open) ? (

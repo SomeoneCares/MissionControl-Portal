@@ -18,6 +18,9 @@ fresh-host install and a smoke-test checklist for the first run.
 - A reachable **Hermes gateway** (local `http://127.0.0.1:8642` by default) with its `API_SERVER_KEY`.
 - *Optional, for PDF/Word document attachments and Word export:* `pymupdf4llm`, `pypdf`,
   `python-docx` (pip) and `pandoc` (OS package). Absent, those features degrade gracefully.
+- *Optional, for the in-reader document preview* (rendered page images): `poppler-utils`
+  (`pdftoppm`, small — needed for **PDF** preview) and **LibreOffice** (`soffice`, large — needed
+  for **DOCX/PPTX/XLSX** preview). Without them the reader falls back to a download link.
 
 ---
 
@@ -108,8 +111,10 @@ Run these on the fresh host and note anything that isn't right. Tail the log alo
    agent answers.
 6. **Runs.** Real runs appear from `agent-logs`; failed rows render; a run's detail opens.
 7. **Tasks.** The live kanban board loads its columns/cards (Hermes `kanban`).
-8. **Content.** Documents list (or an honest empty state). Set a per-fleet folder in **Settings →
-   Fleet content libraries**; the Content tab groups by fleet. Open a text doc; download a binary one.
+8. **Content.** Documents list (or an honest empty state) with stat tiles + colour-coded authors.
+   Set a per-fleet folder in **Settings → Fleet content libraries**; the tab groups by fleet. Open a
+   markdown doc (renders inline); open a **PDF/DOCX** — with poppler/LibreOffice installed you get a
+   rendered page-image preview + an **Original** download, otherwise a download link (both correct).
 9. **Office.** Skyline + Armillary render N buildings/bodies for the real fleet; with distinct fleet
    accents set, the fleets read as different colours; executing agents pulse green.
 10. **LAN reach.** Open `http://<host-ip>:51770` from another device on the network.

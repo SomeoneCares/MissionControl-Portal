@@ -81,7 +81,12 @@ if [ "$CONTENT_DEPS" = 1 ]; then
     && ok "pymupdf4llm, pypdf, python-docx (PDF/Word attachments + Word export)" \
     || warn "pip install failed — content attachments will degrade gracefully"
   command -v pandoc >/dev/null && ok "pandoc present (doc/odt/rtf/html attachments)" \
-    || warn "pandoc not found — install it from your OS package manager for non-PDF doc attachments"
+    || warn "pandoc not found — install it (e.g. apt install pandoc) for non-PDF doc attachments"
+  # document PREVIEW (rendered page images): poppler for PDFs, LibreOffice for office files
+  command -v pdftoppm >/dev/null && ok "pdftoppm present (PDF preview)" \
+    || warn "pdftoppm not found — 'apt install poppler-utils' to preview PDFs in the reader"
+  { command -v soffice >/dev/null || command -v libreoffice >/dev/null; } && ok "LibreOffice present (DOCX/PPTX/XLSX preview)" \
+    || warn "LibreOffice not found — 'apt install libreoffice' (large) to preview DOCX/PPTX/XLSX; without it those stay download-only"
 fi
 
 # ---- service ----------------------------------------------------------------

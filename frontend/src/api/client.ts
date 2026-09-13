@@ -130,6 +130,11 @@ export const api = {
   contentDelete: (p: string) => postJSON<{ ok: boolean }>("/api/content/delete", { path: p }),
   contentDownloadUrl: (p: string) => withConnection(`/api/content/download?path=${encodeURIComponent(p)}`),
   contentWordUrl: (p: string) => withConnection(`/api/content/word?path=${encodeURIComponent(p)}`),
+  contentPreview: (p: string) =>
+    getJSON<{ supported: boolean; pages: number; kind?: string; reason?: string }>(
+      `/api/content/preview?path=${encodeURIComponent(p)}`),
+  contentPreviewImageUrl: (p: string, page: number) =>
+    withConnection(`/api/content/preview/image?path=${encodeURIComponent(p)}&page=${page}`),
   createAgent: (spec: { name: string; role?: string; model?: string; provider?: string }) =>
     postJSON<{ ok: boolean; agent: string; name: string }>("/api/agents/create", spec),
   agentSkills: (agent: string) =>
