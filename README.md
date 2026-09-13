@@ -11,6 +11,24 @@ for the live half.
 
 ---
 
+## Quick start
+
+```bash
+git clone <this-repo> hermes-mission-control
+cd hermes-mission-control
+installer/install.sh --content-deps      # builds the UI, installs a service, prints the URL
+```
+
+Then open `http://<host-ip>:51770` and sign in with **admin / admin** (change it in Settings →
+Access). Prefer to run it yourself? `installer/install.sh --no-service` then
+`bash installer/run-portal.sh`. Full instructions, config, modes, and a first-run **smoke-test
+checklist** are in **[docs/DEPLOY.md](docs/DEPLOY.md)**.
+
+Requirements: Python 3.10+ and (to build the front end) Node 18+/npm. The backend is pure
+standard library; the built front-end bundle is not committed, so a fresh clone builds it once.
+
+---
+
 ## Architecture
 
 ```
@@ -85,11 +103,14 @@ mode is read-only for model/cron changes).
 backend/          Python backend — data layer, state builder, gateway client, HTTP server
   hermes_mc/      the package
 frontend/         React + Vite + TypeScript front end
-installer/        install.sh + Python helper; systemd units; bridge installer
-docs/             design notes, data contract
+installer/        install.sh (build + service), run-portal.sh (systemd-free run);
+                  gw.sh / propagate-key.sh (host-side gateway helpers, environment-specific)
+docs/             DEPLOY.md (install + smoke test), design notes, build log
 reference/        read-only copies of prior art (original server.py) — not shipped
 ```
 
 ## Status
 
-Under construction. See `docs/` for the build log.
+Feature-complete for LAN operation; see **[docs/DEPLOY.md](docs/DEPLOY.md)** to install and run the
+first-run smoke test. Not yet validated on a second/fresh Hermes host — treat the first vanilla
+deploy as a shakedown. See `docs/` for the build log.
