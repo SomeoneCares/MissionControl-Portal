@@ -5,7 +5,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { FleetAgent, SceneController, SceneOpts } from "./scene";
-import { officeAccentHex, mixWhiteHex } from "./scene";
+import { officeAccentHex, mixWhiteHex, agentAccentHex } from "./scene";
 
 // City colour follows the portal accent (Settings); with none chosen it falls back to the
 // original skyline's royal blue. Idle/assigned windows glow this accent; "processing now"
@@ -79,7 +79,7 @@ function specs(fleet: FleetAgent[]): Spec[] {
       windowCols: 4 + Math.round(hs * 2),
       silhouette: SIL[Math.floor(hash(a.agent + "s") * SIL.length)],
       monument: MON[Math.floor(hash(a.agent + "m") * MON.length)],
-      accent: EMBER,
+      accent: agentAccentHex(a),   // this agent's fleet colour (falls back to the global accent)
     });
   });
   return out;
@@ -301,7 +301,7 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[], opt
   labelLayer.style.cssText = "position:absolute;inset:0;pointer-events:none;z-index:5;overflow:hidden;";
   wrap.appendChild(labelLayer);
 
-  interface Built { a: Spec; root: THREE.Group; inner: THREE.Group; windows: THREE.InstancedMesh; halo: THREE.Mesh; label: HTMLDivElement; accentMats: THREE.MeshStandardMaterial[]; }
+  interface Built { a: Spec; root: THREE.Group; inner: THREE.Group; windows: THREE.InstancedMesh; halo: THREE.Mesh; label: HTMLDivElement; accentMats: THREE.MeshStandardMaterial[]; idle: THREE.Color; }
   const buildings: Built[] = [];
   built.forEach((a) => {
     const root = new THREE.Group(); root.position.set(...a.position);
@@ -329,13 +329,13 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[], opt
       const ms = anyO.material ? (Array.isArray(anyO.material) ? anyO.material : [anyO.material]) : [];
       ms.forEach((m) => { const sm2 = m as THREE.MeshStandardMaterial; if (sm2 && sm2.emissive && sm2.emissive.getHex() !== 0) accentMats.push(sm2); });
     });
-    buildings.push({ a, root, inner, windows, halo, label, accentMats });
+    buildings.push({ a, root, inner, windows, halo, label, accentMats, idle: new THREE.Color(a.accent) });
     scene.add(root);
   });
 
   // three states, three hues: EXECUTING pulses green (processing now), ASSIGNED glows steady orange
   // (task in hand), IDLE glows the accent blue (dim).
-  const WORK_COL = new THREE.Color(SPOTLIGHT), ASSIGNED_COL = new THREE.Color("#ee8a2f"), IDLE_COL = new THREE.Color(EMBER);
+  const WORK_COL = new THREE.Color(SPOTLIGHT), ASSIGNED_COL = new THREE.Color("#ee8a2f");
   const stateOf = new Map(fleet.map((a) => [a.agent, (a.state || "IDLE").toUpperCase()]));
   const isExec = (s: string) => s === "EXECUTING" || s === "PROCESSING_NOW" || s === "TASK_IN_PROGRESS";
   const isAssigned = (s: string) => s === "ASSIGNED" || s === "TASK_ASSIGNED";
@@ -397,7 +397,7 @@ export function buildSkyline(canvas: HTMLCanvasElement, fleet: FleetAgent[], opt
       b.halo.visible = sel || hov;
       const st = stateOf.get(b.a.code) || "IDLE";
       const exec = isExec(st), assigned = isAssigned(st);
-      const col = exec ? WORK_COL : assigned ? ASSIGNED_COL : IDLE_COL; // green / orange / blue
+      const col = exec ? WORK_COL : assigned ? ASSIGNED_COL : b.idle; // green / orange / fleet accent (idle)
       const wd = b.windows.userData as { accent: THREE.Color; dim: THREE.Color; instances: Inst[]; state: string };
       wd.accent.copy(col);
       (b.windows.material as THREE.MeshStandardMaterial).emissive.copy(col);

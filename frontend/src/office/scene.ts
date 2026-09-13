@@ -31,6 +31,14 @@ export interface FleetAgent {
   success: number;
   share: number;
   state: string;
+  fleetAccent?: string;   // this agent's fleet accent hex ("" → the global portal accent)
+}
+
+// The agent's own colour: its fleet accent when set and valid, else the global portal accent.
+export function agentAccentHex(a: FleetAgent): string {
+  const fa = a.fleetAccent;
+  if (fa && /^#?[0-9a-f]{6}$/i.test(fa)) return fa[0] === "#" ? fa : "#" + fa;
+  return officeAccentHex();
 }
 
 export interface SceneOpts {
@@ -142,7 +150,6 @@ function baseScene(canvas: HTMLCanvasElement) {
 export function buildArmillary(canvas: HTMLCanvasElement, fleet: FleetAgent[], opts: SceneOpts = {}): SceneController {
   const { renderer, scene, camera, controls, resize } = baseScene(canvas);
   const EMBER = officeAccent();
-  const EMBER_SOFT = parseInt(mixWhiteHex(officeAccentHex(), 0.34).slice(1), 16);
   const glow = glowTexture();
   const motes = makeMotes(scene, glow);
   camera.position.set(0, 3, 14);
@@ -184,13 +191,17 @@ export function buildArmillary(canvas: HTMLCanvasElement, fleet: FleetAgent[], o
     const working = isWorking(a);       // executing → green
     const assigned = isAssigned(a);     // task assigned → orange
     const active = working || assigned;
-    const bodyColor = working ? SPOTLIGHT : assigned ? ASSIGNED : EMBER_SOFT; // green / orange / accent-blue (idle)
+    // idle bodies wear their fleet's accent; live state (green/orange) still overrides
+    const aHex = agentAccentHex(a);
+    const aNum = parseInt(aHex.slice(1), 16);
+    const aSoft = parseInt(mixWhiteHex(aHex, 0.34).slice(1), 16);
+    const bodyColor = working ? SPOTLIGHT : assigned ? ASSIGNED : aSoft; // green / orange / fleet accent (idle)
     const body = new THREE.Mesh(new THREE.SphereGeometry(rad, 24, 24), new THREE.MeshStandardMaterial({
-      color: bodyColor, emissive: working ? 0x0d5a34 : assigned ? ASSIGNED : EMBER, emissiveIntensity: active ? 0.5 : 0.16, roughness: 0.55, metalness: 0.25,
+      color: bodyColor, emissive: working ? 0x0d5a34 : assigned ? ASSIGNED : aNum, emissiveIntensity: active ? 0.5 : 0.16, roughness: 0.55, metalness: 0.25,
     }));
     body.userData.agent = a.agent;
     pivot.add(body);
-    const bglow = glowSprite(glow, rad * 5, working ? SPOTLIGHT : assigned ? ASSIGNED : EMBER, active ? 0.55 : 0.2);
+    const bglow = glowSprite(glow, rad * 5, working ? SPOTLIGHT : assigned ? ASSIGNED : aNum, active ? 0.55 : 0.2);
     pivot.add(bglow);
     const label = labelSprite(a.initials, 0.34); pivot.add(label);
     bodies.push({ pivot, body, bglow, label, agent: a, R, spd: 0.1 + (a.tasksToday / maxTasks) * 0.42, ph: i * 1.1, working });

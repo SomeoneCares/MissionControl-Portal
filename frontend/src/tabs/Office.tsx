@@ -21,11 +21,13 @@ export function Office({ state }: { state: State }) {
   useEffect(() => settings.subscribe(() => setAccent(settings.get().accent)), []);
   useEffect(() => { api.fleets().then(setGroups).catch(() => setGroups(null)); }, []);
 
+  const accentOf = (agent: string) => groups?.fleets.find((f) => f.members.includes(agent))?.accent || "";
   const fleet: FleetAgent[] = state.fleet.map((a) => ({
     agent: a.agent, initials: a.initials, name: a.name, role: a.role,
     tasksToday: a.tasksToday, success: a.success, share: a.share, state: a.state,
+    fleetAccent: accentOf(a.agent),
   }));
-  const fleetKey = fleet.map((a) => `${a.agent}:${a.tasksToday}:${a.state}`).join("|");
+  const fleetKey = fleet.map((a) => `${a.agent}:${a.tasksToday}:${a.state}:${a.fleetAccent}`).join("|");
 
   useEffect(() => {
     if (!canvasRef.current) return;
