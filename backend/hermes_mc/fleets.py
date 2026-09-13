@@ -45,9 +45,13 @@ class Fleet:
     name: str
     accent: str = ""
     members: list[str] = field(default_factory=list)
+    content_dir: str = ""     # this fleet's own content-library folder ("" → uses the portal default)
 
     def public(self) -> dict:
-        return {"id": self.id, "name": self.name, "accent": self.accent, "members": list(self.members)}
+        cd = self.content_dir
+        return {"id": self.id, "name": self.name, "accent": self.accent, "members": list(self.members),
+                "content_dir": cd,
+                "content_ok": bool(cd) and Path(cd).expanduser().is_dir()}
 
 
 class FleetGroups:
@@ -77,15 +81,17 @@ class FleetGroups:
                 id=str(f.get("id") or _slug(f.get("name", ""))),
                 name=str(f.get("name") or "Fleet"),
                 accent=str(f.get("accent") or ""),
-                members=[str(m) for m in (f.get("members") or [])]))
+                members=[str(m) for m in (f.get("members") or [])],
+                content_dir=str(f.get("content_dir") or "")))
         self._seeded = True        # a file exists (even if empty) → user intent, don't re-seed
 
     def _save(self):
         try:
             self.project_dir.mkdir(parents=True, exist_ok=True)
-            self._store.write_text(
-                json.dumps({"fleets": [f.public() for f in self.fleets]}, indent=2),
-                encoding="utf-8")
+            stored = [{"id": f.id, "name": f.name, "accent": f.accent,
+                       "members": list(f.members), "content_dir": f.content_dir}
+                      for f in self.fleets]
+            self._store.write_text(json.dumps({"fleets": stored}, indent=2), encoding="utf-8")
         except OSError:
             pass
 
@@ -119,8 +125,7 @@ class FleetGroups:
         live = set(profiles)
         return {
             # members annotated with whether the profile is currently live on the connection
-            "fleets": [{"id": f.id, "name": f.name, "accent": f.accent,
-                        "members": list(f.members),
+            "fleets": [{**f.public(),
                         "live_members": [m for m in f.members if m in live]} for f in self.fleets],
             "ungrouped": ungrouped,
             "profiles": list(profiles),
@@ -146,7 +151,8 @@ class FleetGroups:
         self._save()
         return fleet.public()
 
-    def update(self, fleet_id: str, name: Optional[str], accent: Optional[str]) -> dict:
+    def update(self, fleet_id: str, name: Optional[str], accent: Optional[str],
+               content_dir: Optional[str] = None) -> dict:
         self._load()
         fleet = self._find(fleet_id)
         if not fleet:
@@ -158,8 +164,22 @@ class FleetGroups:
             fleet.name = n
         if accent is not None:
             fleet.accent = _norm_accent(accent)
+        if content_dir is not None:
+            cd = str(content_dir).strip()
+            if cd and not cd.startswith(("/", "~")):
+                raise ValueError("content folder must be an absolute path (or start with ~)")
+            fleet.content_dir = cd
         self._save()
         return fleet.public()
+
+    def roots(self) -> dict[str, Path]:
+        """Map fleet id → its configured content folder (absolute, ~ expanded). Skips unset ones."""
+        self._load()
+        out: dict[str, Path] = {}
+        for f in self.fleets:
+            if f.content_dir:
+                out[f.id] = Path(f.content_dir).expanduser()
+        return out
 
     def assign(self, profile: str, fleet_id: str) -> dict:
         """Move a profile into a fleet (fleet_id="" → Ungrouped). One fleet per profile."""

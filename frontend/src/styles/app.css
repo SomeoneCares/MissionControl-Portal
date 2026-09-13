@@ -643,6 +643,10 @@
 .fleet-name-input { flex: 1; min-width: 0; }
 .fleet-count { flex: none; white-space: nowrap; }
 .fleet-select-inline { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--ground); color: var(--ink); font-size: 12px; }
+/* per-fleet content-folder rows (Settings) */
+.fleet-content-row { flex-wrap: wrap; }
+.fleet-content-name { font-size: 13px; font-weight: 500; min-width: 84px; }
+.fleet-content-input { flex: 1; min-width: 160px; }
 /* fleet section headers inside the chat roster and content list */
 .roster-group + .roster-group, .content-group + .content-group { margin-top: 4px; }
 .roster-group-head, .content-group-head { display: flex; align-items: center; gap: 7px; padding: 9px 4px 4px; }

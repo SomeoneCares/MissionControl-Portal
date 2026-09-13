@@ -50,6 +50,8 @@ export interface FleetGroup {
   id: string; name: string; accent: string;
   members: string[];        // profile names assigned to this fleet (may include ones not live)
   live_members?: string[];  // members currently present on the connection
+  content_dir?: string;     // this fleet's own content-library folder ("" → portal default)
+  content_ok?: boolean;     // whether that folder currently exists on disk
 }
 export interface FleetGroupsView {
   fleets: FleetGroup[];
@@ -101,7 +103,7 @@ export const api = {
   // profile-group "fleets" — portal-side grouping over the selected connection's profiles
   fleets: () => getJSON<FleetGroupsView>("/api/fleets"),
   createFleet: (spec: { name: string; accent?: string }) => postJSON<FleetGroup>("/api/fleets", spec),
-  updateFleet: (id: string, patch: { name?: string; accent?: string }) =>
+  updateFleet: (id: string, patch: { name?: string; accent?: string; content_dir?: string }) =>
     postJSON<FleetGroup>("/api/fleets/update", { id, ...patch }),
   assignFleet: (profile: string, fleet: string) =>
     postJSON<{ ok: boolean; error?: string }>("/api/fleets/assign", { profile, fleet }),
@@ -222,6 +224,7 @@ export interface ContentDoc {
   kind?: string;   // file extension without the dot: "md" | "pdf" | "txt" | …
   modified_at: string;
   size: number;
+  fleet?: string;  // id of the fleet whose content folder this doc came from ("" = portal default)
 }
 
 export interface ToolEvent {

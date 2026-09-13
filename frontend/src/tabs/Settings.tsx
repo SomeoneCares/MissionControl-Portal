@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { HealthInfo } from "../types";
-import { api, setConnection, getConnection, type ConnectionInfo, type ContentDirInfo } from "../api/client";
+import { api, setConnection, getConnection, type ConnectionInfo, type ContentDirInfo, type FleetGroup } from "../api/client";
 import { settings, applySettings, ACCENT_PRESETS } from "../store/settings";
 
 // Settings — branding (name, accent, theme), connected Hermes hosts, and connection info.
@@ -105,8 +105,11 @@ export function Settings({ health }: { health: HealthInfo | null }) {
         </ul>
       </section>
 
-      {/* content library folder */}
+      {/* content library folder (portal default) */}
       <ContentDirBlock />
+
+      {/* per-fleet content libraries */}
+      <FleetContentBlock />
 
       {/* connection */}
       <section className="card settings-block">
@@ -259,6 +262,58 @@ function ContentDirBlock() {
         </>
       )}
     </section>
+  );
+}
+
+function FleetContentBlock() {
+  const [fleets, setFleets] = useState<FleetGroup[]>([]);
+  const reload = () => api.fleets().then((d) => setFleets(d.fleets)).catch(() => setFleets([]));
+  useEffect(() => { reload(); }, []);
+  if (fleets.length === 0) return null;   // nothing to configure until fleets exist
+
+  return (
+    <section className="card settings-block">
+      <span className="eyebrow block-title">Fleet content libraries</span>
+      <p className="mono muted block-note">
+        Point each fleet at its own content folder (e.g. <code>~/pentest-fleet/content</code>). The
+        Content tab aggregates every fleet's library, grouped by fleet; documents outside these
+        folders stay under the portal default above. Absolute path (or <code>~</code>).
+      </p>
+      <ul className="fleet-list">
+        {fleets.map((f) => <FleetContentRow key={f.id} fleet={f} onSaved={reload} />)}
+      </ul>
+    </section>
+  );
+}
+
+function FleetContentRow({ fleet, onSaved }: { fleet: FleetGroup; onSaved: () => void }) {
+  const [path, setPath] = useState(fleet.content_dir ?? "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const dirty = path.trim() !== (fleet.content_dir ?? "");
+
+  const save = async () => {
+    setBusy(true); setErr(null);
+    try { await api.updateFleet(fleet.id, { content_dir: path.trim() }); onSaved(); }
+    catch (e) { setErr(String(e).replace(/^Error:\s*/, "").replace(/ → HTTP \d+$/, "")); }
+    setBusy(false);
+  };
+
+  return (
+    <li className="fleet-item fleet-content-row">
+      <span className="fleet-swatch" style={{ background: fleet.accent || "var(--ember)" }} />
+      <span className="fleet-content-name">{fleet.name}</span>
+      <input className="add-input mono fleet-content-input" value={path} spellCheck={false}
+             placeholder="~/fleet/content"
+             onChange={(e) => setPath(e.target.value)}
+             onKeyDown={(e) => e.key === "Enter" && dirty && save()} />
+      {path.trim() !== "" && (
+        <span className={`status-dot ${fleet.content_ok ? "up" : "down"}`}
+              title={fleet.content_ok ? "folder exists" : "folder not found"} />
+      )}
+      <button className="btn-primary" onClick={save} disabled={busy || !dirty}>{busy ? "…" : "Save"}</button>
+      {err && <span className="att-note mono">{err}</span>}
+    </li>
   );
 }
 

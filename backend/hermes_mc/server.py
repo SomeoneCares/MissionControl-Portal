@@ -93,6 +93,18 @@ class DataProvider:
         data = self._bridge_get(f"/content/read?path={quote(rel_path)}")
         return data if isinstance(data, dict) else {"path": rel_path, "exists": False, "content": ""}
 
+    # -- per-root variants (for per-fleet content folders; local mode only) --
+    def content_docs_at(self, root: Path) -> list[dict]:
+        return self._local.content_docs(root) if self._local else []
+
+    def content_read_at(self, root: Path, rel_path: str) -> dict:
+        if self._local:
+            return self._local.content_read(root, rel_path)
+        return {"path": rel_path, "exists": False, "content": ""}
+
+    def content_store_at(self, root: Path) -> "ContentStore":
+        return ContentStore(root)
+
     def content_dir_info(self) -> dict:
         """Describe the content library folder for the Settings panel."""
         default = str((self.cfg.project_dir / "content").expanduser())
@@ -381,6 +393,38 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return []
 
+    # -- content roots: the portal default ("") + each fleet's own folder -----
+    # Doc paths are encoded "<fleetid>::<relpath>" (no prefix for the default root) so a single
+    # path token routes every read/save/download/delete to the right folder.
+    def _content_roots(self) -> dict:
+        roots: dict = {}
+        cd = getattr(self.provider.cfg, "content_dir", None) if self.provider else None
+        if cd:
+            roots[""] = Path(cd)
+        if self.provider and self.provider.cfg.is_local:
+            for fid, root in self._fleets().roots().items():
+                roots[fid] = root
+        return roots
+
+    @staticmethod
+    def _split_source(path: str):
+        if "::" in path:
+            sid, rel = path.split("::", 1)
+            return sid, rel
+        return "", path
+
+    def _root_for(self, sid: str):
+        roots = self._content_roots()
+        return roots[sid] if sid in roots else roots.get("")
+
+    def _fleet_of_profile(self, profile: str) -> str:
+        if not profile:
+            return ""
+        for f in self._fleets().view(self._profiles())["fleets"]:
+            if profile in f["members"]:
+                return f["id"]
+        return ""
+
     # -- auth -------------------------------------------------------------
 
     def _session_id(self) -> str:
@@ -551,20 +595,40 @@ class Handler(BaseHTTPRequestHandler):
             tid = (parse_qs(urlparse(self.path).query).get("id") or [""])[0]
             return self._json(self.provider.task_detail(tid))
         if path == "/api/content":
-            return self._json({"docs": self.provider.content_docs()})
+            roots = self._content_roots()
+            if not self.provider.cfg.is_local or len(roots) <= 1:
+                return self._json({"docs": self.provider.content_docs()})
+            docs = []
+            for sid, root in roots.items():
+                for d in self.provider.content_docs_at(root):
+                    d["fleet"] = sid
+                    if sid:
+                        d["path"] = f"{sid}::{d['path']}"
+                    docs.append(d)
+            docs.sort(key=lambda d: d.get("modified_at", ""), reverse=True)
+            return self._json({"docs": docs})
         if path == "/api/content/dir":
             return self._json(self.provider.content_dir_info())
         if path == "/api/content/read":
-            rel = parse_qs(urlparse(self.path).query).get("path", [""])[0]
+            raw = parse_qs(urlparse(self.path).query).get("path", [""])[0]
+            sid, rel = self._split_source(raw)
             try:
-                return self._json(self.provider.content_read(rel))
+                if self.provider.cfg.is_local:
+                    root = self._root_for(sid)
+                    r = (self.provider.content_read_at(root, rel) if root is not None
+                         else {"path": rel, "exists": False, "content": ""})
+                    r["path"] = raw
+                    return self._json(r)
+                return self._json(self.provider.content_read(raw))
             except ValueError as e:
                 return self._json({"error": str(e)}, status=400)
         if path in ("/api/content/download", "/api/content/word"):
-            cs = self.provider.content_store
+            raw = parse_qs(urlparse(self.path).query).get("path", [""])[0]
+            sid, rel = self._split_source(raw)
+            root = self._root_for(sid) if self.provider.cfg.is_local else None
+            cs = self.provider.content_store_at(root) if root is not None else self.provider.content_store
             if not cs:
                 return self._json({"error": "content editing is local-mode only"}, status=403)
-            rel = parse_qs(urlparse(self.path).query).get("path", [""])[0]
             try:
                 if path == "/api/content/word":
                     data, fname = cs.to_docx(rel)
@@ -630,7 +694,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)}, status=400)
         if path == "/api/fleets/update":
             try:
-                return self._json(self._fleets().update(body.get("id", ""), body.get("name"), body.get("accent")))
+                return self._json(self._fleets().update(
+                    body.get("id", ""), body.get("name"), body.get("accent"), body.get("content_dir")))
             except ValueError as e:
                 return self._json({"error": str(e)}, status=400)
         if path == "/api/fleets/assign":
@@ -694,15 +759,30 @@ class Handler(BaseHTTPRequestHandler):
                 except ContentError as e:
                     return self._json({"error": str(e)}, status=400)
             if path in ("/api/content/save", "/api/content/create", "/api/content/delete"):
-                cs = self.provider.content_store
+                if not self.provider.cfg.is_local:
+                    return self._json({"error": "content editing is local-mode only"}, status=403)
+                # route the write to the right root: a new doc goes to its author's fleet folder;
+                # save/delete carry the source in their encoded path.
+                if path == "/api/content/create":
+                    sid = self._fleet_of_profile(body.get("agent", ""))
+                else:
+                    sid, _ = self._split_source(body.get("path", ""))
+                root = self._root_for(sid)
+                cs = self.provider.content_store_at(root) if root is not None else self.provider.content_store
                 if not cs:
                     return self._json({"error": "content editing is local-mode only"}, status=403)
                 try:
                     if path == "/api/content/save":
-                        return self._json(cs.save(body.get("path", ""), body.get("content", "")))
-                    if path == "/api/content/create":
-                        return self._json(cs.create(body.get("agent", ""), body.get("title", "")))
-                    return self._json(cs.delete(body.get("path", "")))
+                        _, rel = self._split_source(body.get("path", ""))
+                        r = cs.save(rel, body.get("content", ""))
+                    elif path == "/api/content/create":
+                        r = cs.create(body.get("agent", ""), body.get("title", ""))
+                    else:
+                        _, rel = self._split_source(body.get("path", ""))
+                        r = cs.delete(rel)
+                    if sid and isinstance(r, dict) and "path" in r:
+                        r["path"] = f"{sid}::{r['path']}"
+                    return self._json(r)
                 except ContentError as e:
                     return self._json({"error": str(e)}, status=400)
         except ValueError as e:

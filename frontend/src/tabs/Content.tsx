@@ -29,17 +29,18 @@ export function Content() {
   );
   const list = (docs ?? []).filter((d) => agent === "all" || d.agent === agent);
 
-  // group the doc list by the author's fleet (only when not already narrowed to one author)
+  // group the doc list by the fleet whose content folder each doc came from (source-based),
+  // only when not already narrowed to a single author
   const docSections: { name: string; accent: string; docs: ContentDoc[] }[] | null =
     agent === "all" && (groups?.fleets.length ?? 0) > 0
       ? [
           ...groups!.fleets.map((f) => ({
             name: f.name, accent: f.accent,
-            docs: list.filter((d) => d.agent && f.members.includes(d.agent)),
+            docs: list.filter((d) => d.fleet === f.id),
           })),
           {
             name: "Ungrouped", accent: "",
-            docs: list.filter((d) => !d.agent || !groups!.fleets.some((f) => f.members.includes(d.agent))),
+            docs: list.filter((d) => !d.fleet || !groups!.fleets.some((f) => f.id === d.fleet)),
           },
         ].filter((s) => s.docs.length > 0)
       : null;
