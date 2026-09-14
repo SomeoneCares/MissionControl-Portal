@@ -92,6 +92,33 @@ gateway; full read/write needs local mode or the host-side bridge.
 
 ---
 
+## Enabling Chat (the Hermes gateway API)
+
+On a fresh Hermes host the gateway API is usually **off**, so the portal honestly shows
+"gateway down" and Chat is unavailable — everything else (Overview, Agents, Runs, Tasks, Content)
+works without it. To turn Chat on, on the **Hermes host**:
+
+```bash
+# 1. enable the API server and give it a key (Hermes may NOT auto-generate one)
+grep -q '^API_SERVER_ENABLED=' ~/.hermes/.env \
+  && sed -i 's/^API_SERVER_ENABLED=.*/API_SERVER_ENABLED=true/' ~/.hermes/.env \
+  || echo 'API_SERVER_ENABLED=true' >> ~/.hermes/.env
+grep -q '^API_SERVER_KEY=' ~/.hermes/.env \
+  || echo "API_SERVER_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(24))')" >> ~/.hermes/.env
+
+# 2. restart the gateway so it binds :8642 with that key
+hermes gateway restart            # if that subcommand differs: hermes gateway --help
+
+# 3. confirm it's listening (401 = up and wants the key; 000 = not running)
+curl -s -o /dev/null -w 'gateway %{http_code}\n' http://127.0.0.1:8642/v1/models
+
+# 4. restart the PORTAL — it reads the gateway key only at startup
+bash installer/run-portal.sh
+```
+
+Reload the portal; the health pill flips to **gateway live** and Chat streams. (Per-agent chat
+needs Hermes multiplexing; otherwise it's single-agent.)
+
 ## First-run smoke test
 
 Run these on the fresh host and note anything that isn't right. Tail the log alongside:
