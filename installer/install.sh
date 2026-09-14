@@ -77,9 +77,14 @@ fi
 # ---- optional content dependencies ------------------------------------------
 if [ "$CONTENT_DEPS" = 1 ]; then
   say "Installing optional content dependencies"
-  python3 -m pip install --user --upgrade pymupdf4llm pypdf python-docx \
-    && ok "pymupdf4llm, pypdf, python-docx (PDF/Word attachments + Word export)" \
-    || warn "pip install failed — content attachments will degrade gracefully"
+  # plain --user first; on PEP 668 "externally-managed" hosts (Debian/Ubuntu) retry with the
+  # --break-system-packages escape hatch (these are pure-Python libs, low risk)
+  if python3 -m pip install --user --upgrade pymupdf4llm pypdf python-docx 2>/dev/null \
+     || python3 -m pip install --user --break-system-packages --upgrade pymupdf4llm pypdf python-docx; then
+    ok "pymupdf4llm, pypdf, python-docx (PDF/Word attachments + Word export)"
+  else
+    warn "pip install failed — PDF-attachment text + Word export degrade; document preview still works"
+  fi
   command -v pandoc >/dev/null && ok "pandoc present (doc/odt/rtf/html attachments)" \
     || warn "pandoc not found — install it (e.g. apt install pandoc) for non-PDF doc attachments"
   # document PREVIEW (rendered page images): poppler for PDFs, LibreOffice for office files
@@ -120,7 +125,7 @@ RestartSec=3
     printf '%s\n[Install]\nWantedBy=default.target\n' "$UNIT_CONTENT" > "$HOME/.config/systemd/user/${UNIT_NAME}.service"
     systemctl --user daemon-reload
     systemctl --user enable --now "${UNIT_NAME}.service"
-    loginctl enable-linger "$USER" >/dev/null 2>&1 && ok "lingering enabled (survives logout)" || warn "could not enable linger — service stops when you log out (run: loginctl enable-linger $USER)"
+    loginctl enable-linger "$USER" >/dev/null 2>&1 && ok "lingering enabled (survives logout)" || warn "could not enable linger — service stops on logout; run: sudo loginctl enable-linger $USER"
     ok "systemctl --user status ${UNIT_NAME}"
   else
     warn "systemd not available here — skipping the service"
