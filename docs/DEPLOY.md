@@ -116,8 +116,22 @@ curl -s -o /dev/null -w 'gateway %{http_code}\n' http://127.0.0.1:8642/v1/models
 bash installer/run-portal.sh
 ```
 
-Reload the portal; the health pill flips to **gateway live** and Chat streams. (Per-agent chat
-needs Hermes multiplexing; otherwise it's single-agent.)
+Reload the portal; the health pill flips to **gateway live** and Chat streams.
+
+**Per-agent chat (multiplexing).** If every profile you pick answers as the *default* agent, the
+profiles don't share the gateway key, so only `default` is reachable at `/p/<profile>/` and the rest
+fall back to it. Give every profile the root key and restart the gateway:
+
+```bash
+bash installer/propagate-key.sh   # copies API_SERVER_KEY into each ~/.hermes/profiles/*/.env
+hermes gateway restart
+```
+
+Verify a non-default profile is now reachable (should be `200`):
+```bash
+KEY=$(grep '^API_SERVER_KEY=' ~/.hermes/.env | cut -d= -f2- | tr -d '"')
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $KEY" http://127.0.0.1:8642/p/<profile>/v1/models
+```
 
 ## First-run smoke test
 
