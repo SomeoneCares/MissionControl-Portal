@@ -3,7 +3,7 @@ import type { State, HealthInfo, Agent } from "../types";
 import { api, chatStream, type ChatMessage, type ChatAgents, type ToolEvent, type Attachment, type ApprovalChoice, type SubagentEvent, type FleetGroupsView } from "../api/client";
 import { chatStore, type Turn } from "../store/chatStore";
 import { settings } from "../store/settings";
-import { getVoiceEngine, refreshVoiceStatus } from "../voice/engine";
+import { getVoiceEngine, refreshVoiceStatus, setSttModel } from "../voice/engine";
 
 // Flatten markdown/code to something worth speaking aloud: drop fenced code, list/emphasis marks,
 // link syntax, and headings — keep the prose.
@@ -93,6 +93,7 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
   const [vprefs, setVprefs] = useState(settings.get());
   useEffect(() => settings.subscribe(() => setVprefs(settings.get())), []);
   useEffect(() => { refreshVoiceStatus().then(() => setVprefs(settings.get())); }, []);   // learn backend STT/TTS
+  useEffect(() => { setSttModel(vprefs.voiceWhisperModel); }, [vprefs.voiceWhisperModel]);   // whisper model choice
   const [voiceMode, setVoiceMode] = useState(false);   // hands-free (continuous listen + auto-send + speak)
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState("");

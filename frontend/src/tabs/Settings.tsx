@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { HealthInfo } from "../types";
 import { api, setConnection, getConnection, type ConnectionInfo, type ContentDirInfo, type FleetGroup } from "../api/client";
 import { settings, applySettings, ACCENT_PRESETS } from "../store/settings";
-import { voiceEngineOptions, getVoiceEngine, refreshVoiceStatus, type EngineId, type VoiceInfo } from "../voice/engine";
+import { voiceEngineOptions, getVoiceEngine, refreshVoiceStatus, whisperModels, setSttModel, type EngineId, type VoiceInfo } from "../voice/engine";
 
 // Settings — branding (name, accent, theme), connected Hermes hosts, and connection info.
 // Name + accent are portal-owned and shared across devices (server-persisted); theme is per-viewer
@@ -290,6 +290,7 @@ function VoiceBlock() {
 
   const en = voices.filter((v) => v.lang.toLowerCase().startsWith("en"));
   const ar = voices.filter((v) => v.lang.toLowerCase().startsWith("ar"));
+  const wmodels = whisperModels();
   const speak = (text: string, voiceURI?: string, arVoiceURI?: string) =>
     engine.speak(text, { lang: s.voiceLang, voiceURI, arVoiceURI, rate: s.voiceRate });
 
@@ -337,6 +338,22 @@ function VoiceBlock() {
               {ar.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
             </select>
             {ar.length > 0 && <button className="content-tool" onClick={() => speak("أهلاً، دي النغمة المصري اللي هترد بيها.", undefined, s.voiceNameAr)}>Test Arabic</button>}
+          </div>
+          <div className="set-field">
+            <label>Recognition model (whisper)</label>
+            {wmodels.length > 0 ? (
+              <select className="model-select mono" value={s.voiceWhisperModel}
+                      onChange={(e) => { settings.set({ voiceWhisperModel: e.target.value }); setSttModel(e.target.value); }}>
+                {wmodels.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+            ) : (
+              <input className="add-input mono" value={s.voiceWhisperModel} spellCheck={false}
+                     onChange={(e) => { settings.set({ voiceWhisperModel: e.target.value }); setSttModel(e.target.value); }} />
+            )}
+            <p className="mono muted files-note">
+              Bigger models understand Egyptian dialect far better; the first use downloads the model
+              (large-v3-turbo ≈ 1.6 GB). On CPU, large-v3-turbo is the best balance.
+            </p>
           </div>
         </div>
       ) : (

@@ -751,8 +751,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "whisper is not installed on the host"}, status=501)
             ctype = self.headers.get("Content-Type", "")
             suffix = ".wav" if "wav" in ctype else ".ogg" if "ogg" in ctype else ".webm"
+            model = parse_qs(urlparse(self.path).query).get("model", [""])[0]
             try:
-                return self._json(voice_synth.transcribe(audio, suffix))
+                return self._json(voice_synth.transcribe(audio, suffix, model))
             except Exception as e:
                 return self._json({"error": str(e)[:300]}, status=500)
         body = self._read_body()

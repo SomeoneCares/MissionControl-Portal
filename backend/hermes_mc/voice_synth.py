@@ -47,9 +47,21 @@ VOICES = [
 ]
 
 
+# whisper models worth offering — small/medium are lighter but weak on dialect; large-v3-turbo is
+# the sweet spot for Egyptian Arabic on CPU; large-v3 is most accurate but slow without a GPU.
+WHISPER_MODELS = [
+    {"id": "large-v3-turbo", "label": "large-v3-turbo — recommended (fast, strong Arabic)"},
+    {"id": "large-v3",       "label": "large-v3 — most accurate (slow on CPU)"},
+    {"id": "medium",         "label": "medium — lighter"},
+    {"id": "small",          "label": "small — fastest (weak on Arabic)"},
+]
+DEFAULT_MODEL = os.environ.get("HMC_WHISPER_MODEL", "large-v3-turbo")
+
+
 def status() -> dict:
     tts = tts_available()
-    return {"tts": tts, "stt": stt_available(), "voices": VOICES if tts else []}
+    return {"tts": tts, "stt": stt_available(), "voices": VOICES if tts else [],
+            "whisperModels": WHISPER_MODELS, "whisperDefault": DEFAULT_MODEL}
 
 
 def synthesize(text: str, voice: str, rate: str = "+0%") -> bytes:
@@ -75,29 +87,43 @@ def synthesize(text: str, voice: str, rate: str = "+0%") -> bytes:
     return asyncio.run(run())
 
 
-_MODEL = None  # cached whisper model
+_MODELS: dict = {}  # name → cached WhisperModel
 
 
-def transcribe(audio: bytes, suffix: str = ".webm") -> dict:
-    """audio bytes → {"text", "lang"} via whisper (language auto-detected)."""
+def _load(name: str):
+    """Load (and cache) a faster-whisper model — GPU if available, else CPU int8."""
+    if name in _MODELS:
+        return _MODELS[name]
+    from faster_whisper import WhisperModel
+    dev = os.environ.get("HMC_WHISPER_DEVICE", "")
+    if dev:
+        m = WhisperModel(name, device=dev, compute_type=os.environ.get("HMC_WHISPER_COMPUTE", "default"))
+    else:
+        try:
+            m = WhisperModel(name, device="cuda", compute_type="float16")
+        except Exception:
+            m = WhisperModel(name, device="cpu", compute_type="int8")
+    _MODELS[name] = m
+    return m
+
+
+def transcribe(audio: bytes, suffix: str = ".webm", model: str = "") -> dict:
+    """audio bytes → {"text", "lang", "model"} via whisper (language auto-detected)."""
+    name = (model or DEFAULT_MODEL).strip() or DEFAULT_MODEL
     tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
     tmp.write(audio)
     tmp.close()
     try:
         try:
-            from faster_whisper import WhisperModel
-            global _MODEL
-            if _MODEL is None:
-                size = os.environ.get("HMC_WHISPER_MODEL", "base")
-                _MODEL = WhisperModel(size, device="cpu", compute_type="int8")
-            segments, info = _MODEL.transcribe(tmp.name, language=None, vad_filter=True)
+            m = _load(name)
+            segments, info = m.transcribe(tmp.name, language=None, vad_filter=True)
             text = "".join(seg.text for seg in segments).strip()
-            return {"text": text, "lang": getattr(info, "language", "") or ""}
+            return {"text": text, "lang": getattr(info, "language", "") or "", "model": name}
         except ImportError:
             import whisper
-            model = whisper.load_model(os.environ.get("HMC_WHISPER_MODEL", "base"))
-            r = model.transcribe(tmp.name)
-            return {"text": (r.get("text") or "").strip(), "lang": r.get("language") or ""}
+            wm = whisper.load_model(name if name in ("tiny", "base", "small", "medium", "large") else "base")
+            r = wm.transcribe(tmp.name)
+            return {"text": (r.get("text") or "").strip(), "lang": r.get("language") or "", "model": name}
     finally:
         try:
             os.unlink(tmp.name)

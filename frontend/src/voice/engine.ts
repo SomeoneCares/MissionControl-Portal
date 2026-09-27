@@ -113,11 +113,20 @@ class WebSpeechEngine implements VoiceEngine {
 // on ~1s of silence, POST the audio to /api/voice/transcribe (whisper auto-detects the language).
 // TTS POSTs text to /api/voice/speak and plays the mp3; the voice is auto-picked by script (Arabic
 // → the ar-EG voice, else the English voice) so bilingual replies sound right.
-let shStatus: { tts: boolean; stt: boolean; voices: VoiceInfo[] } = { tts: false, stt: false, voices: [] };
+export interface WhisperModelInfo { id: string; label: string; }
+let shStatus: { tts: boolean; stt: boolean; voices: VoiceInfo[]; whisperModels: WhisperModelInfo[]; whisperDefault: string } =
+  { tts: false, stt: false, voices: [], whisperModels: [], whisperDefault: "" };
+let sttModel = "";   // chosen whisper model (empty → the backend default)
+export function setSttModel(m: string) { sttModel = m || ""; }
+export function whisperModels(): WhisperModelInfo[] { return shStatus.whisperModels; }
 export async function refreshVoiceStatus(): Promise<void> {
   try {
     const r = await fetch("/api/voice/status", { credentials: "same-origin" });
-    if (r.ok) { const d = await r.json(); shStatus = { tts: !!d.tts, stt: !!d.stt, voices: (d.voices || []) as VoiceInfo[] }; }
+    if (r.ok) {
+      const d = await r.json();
+      shStatus = { tts: !!d.tts, stt: !!d.stt, voices: (d.voices || []) as VoiceInfo[],
+        whisperModels: (d.whisperModels || []) as WhisperModelInfo[], whisperDefault: d.whisperDefault || "" };
+    }
   } catch { /* leave unavailable */ }
 }
 const hasArabic = (s: string) => /[؀-ۿ]/.test(s);
@@ -164,7 +173,8 @@ class SelfHostedEngine implements VoiceEngine {
       const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
       if (blob.size > 1400 && !this.stopped) {
         try {
-          const r = await fetch("/api/voice/transcribe", {
+          const url = "/api/voice/transcribe" + (sttModel ? "?model=" + encodeURIComponent(sttModel) : "");
+          const r = await fetch(url, {
             method: "POST", credentials: "same-origin",
             headers: { "Content-Type": blob.type }, body: blob });
           if (r.ok) { const d = await r.json(); const text = (d.text || "").trim(); if (text) this.h?.onFinal(text); }
