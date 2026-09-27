@@ -15,11 +15,14 @@ export interface Settings {
   voiceEngine: EngineId;
   voiceLang: string;      // BCP-47, e.g. "en-US"
   voiceAutoSpeak: boolean; // speak assistant replies aloud
+  voiceName: string;       // chosen TTS voiceURI ("" = browser default)
+  voiceRate: number;       // speaking rate, 0.5–2 (1 = normal)
 }
 
 const DEFAULTS: Settings = {
   portalName: "", accent: "", theme: "system",
   voiceEngine: "web-speech", voiceLang: "en-US", voiceAutoSpeak: true,
+  voiceName: "", voiceRate: 1,
 };
 
 let current: Settings = load();

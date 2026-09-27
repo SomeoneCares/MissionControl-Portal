@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { HealthInfo } from "../types";
 import { api, setConnection, getConnection, type ConnectionInfo, type ContentDirInfo, type FleetGroup } from "../api/client";
 import { settings, applySettings, ACCENT_PRESETS } from "../store/settings";
-import { voiceEngineOptions, type EngineId } from "../voice/engine";
+import { voiceEngineOptions, getVoiceEngine, type EngineId, type VoiceInfo } from "../voice/engine";
 
 // Settings — branding (name, accent, theme), connected Hermes hosts, and connection info.
 // Name + accent are portal-owned and shared across devices (server-persisted); theme is per-viewer
@@ -273,6 +273,19 @@ function VoiceBlock() {
   const [s, setS] = useState(settings.get());
   useEffect(() => settings.subscribe(() => setS(settings.get())), []);
   const opts = voiceEngineOptions();
+  const engine = getVoiceEngine(s.voiceEngine);
+  const [voices, setVoices] = useState<VoiceInfo[]>(engine.voices());
+  useEffect(() => {
+    const refresh = () => setVoices(getVoiceEngine(settings.get().voiceEngine).voices());
+    refresh();   // browsers load voices async → also refresh on voiceschanged
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.addEventListener("voiceschanged", refresh);
+      return () => window.speechSynthesis.removeEventListener("voiceschanged", refresh);
+    }
+  }, [s.voiceEngine]);
+  const test = () => engine.speak(
+    "Hi — this is how I'll read the fleet's replies.",
+    { lang: s.voiceLang, voiceURI: s.voiceName || undefined, rate: s.voiceRate });
   return (
     <section className="card settings-block">
       <span className="eyebrow block-title">Voice</span>
@@ -299,11 +312,34 @@ function VoiceBlock() {
                  onChange={(e) => settings.set({ voiceLang: e.target.value })} />
         </div>
       </div>
-      <label className="voice-check">
-        <input type="checkbox" checked={s.voiceAutoSpeak}
-               onChange={(e) => settings.set({ voiceAutoSpeak: e.target.checked })} />
-        Speak assistant replies aloud
-      </label>
+      {voices.length > 0 && (
+        <div className="set-field">
+          <label>Voice</label>
+          <select className="model-select mono" value={s.voiceName}
+                  onChange={(e) => settings.set({ voiceName: e.target.value })}>
+            <option value="">Browser default</option>
+            {voices.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+          </select>
+        </div>
+      )}
+      <div className="set-field">
+        <label>Speaking rate · {s.voiceRate.toFixed(1)}×</label>
+        <input type="range" min="0.6" max="1.6" step="0.1" value={s.voiceRate}
+               onChange={(e) => settings.set({ voiceRate: parseFloat(e.target.value) })} />
+      </div>
+      <div className="dir-actions">
+        <label className="voice-check">
+          <input type="checkbox" checked={s.voiceAutoSpeak}
+                 onChange={(e) => settings.set({ voiceAutoSpeak: e.target.checked })} />
+          Speak assistant replies aloud
+        </label>
+        {engine.supportsTts() && <button className="content-tool" onClick={test}>Test voice</button>}
+      </div>
+      <p className="mono muted block-note">
+        Tip: a voice marked <code>online</code> (e.g. a Google voice in Chrome) usually sounds far
+        more natural than the local system voice. For a desktop-app-quality voice, the self-hosted
+        Piper engine is next.
+      </p>
     </section>
   );
 }

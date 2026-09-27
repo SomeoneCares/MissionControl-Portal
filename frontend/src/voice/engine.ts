@@ -14,14 +14,18 @@ export interface ListenHandlers {
   onEnd: () => void;                    // recognition stopped (silence, error, or stopListening)
 }
 
+export interface SpeakOptions { lang: string; voiceURI?: string; rate?: number; pitch?: number; }
+export interface VoiceInfo { id: string; label: string; lang: string; local: boolean; }
+
 export interface VoiceEngine {
   id: EngineId;
   label: string;
   supportsStt(): boolean;
   supportsTts(): boolean;
+  voices(): VoiceInfo[];                 // available TTS voices for the picker (may be empty)
   startListening(lang: string, continuous: boolean, h: ListenHandlers): void;
   stopListening(): void;
-  speak(text: string, lang: string, onEnd?: () => void): void;
+  speak(text: string, opts: SpeakOptions, onEnd?: () => void): void;
   cancelSpeak(): void;
   isSpeaking(): boolean;
 }
@@ -73,10 +77,23 @@ class WebSpeechEngine implements VoiceEngine {
     if (rec) { try { rec.onend = null; rec.stop(); } catch { /* already stopped */ } }
   }
 
-  speak(text: string, lang: string, onEnd?: () => void) {
+  voices(): VoiceInfo[] {
+    if (!this.supportsTts()) return [];
+    return window.speechSynthesis.getVoices().map((v) => ({
+      id: v.voiceURI, label: `${v.name} (${v.lang})${v.localService ? "" : " · online"}`,
+      lang: v.lang, local: v.localService,
+    }));
+  }
+  speak(text: string, opts: SpeakOptions, onEnd?: () => void) {
     if (!this.supportsTts() || !text.trim()) { onEnd?.(); return; }
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = lang || "en-US";
+    u.lang = opts.lang || "en-US";
+    if (opts.rate) u.rate = opts.rate;
+    if (opts.pitch) u.pitch = opts.pitch;
+    if (opts.voiceURI) {
+      const v = window.speechSynthesis.getVoices().find((x) => x.voiceURI === opts.voiceURI);
+      if (v) u.voice = v;
+    }
     u.onend = () => onEnd?.();
     u.onerror = () => onEnd?.();
     window.speechSynthesis.speak(u);

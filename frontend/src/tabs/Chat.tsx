@@ -277,7 +277,7 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
     }
     engine.stopListening(); setListening(false);  // don't transcribe our own TTS
     setSpeaking(true);
-    engine.speak(text, vprefs.voiceLang, () => {
+    engine.speak(text, { lang: vprefs.voiceLang, voiceURI: vprefs.voiceName || undefined, rate: vprefs.voiceRate }, () => {
       setSpeaking(false);
       if (voiceModeRef.current) startListen();     // resume listening after speaking
     });
