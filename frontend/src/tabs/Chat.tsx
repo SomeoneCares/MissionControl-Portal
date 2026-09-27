@@ -218,6 +218,7 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
     setAttachMsg(null);
 
     const payload: ChatMessage[] = history.map((t) => ({ role: t.role, content: t.content }));
+    let spoke = false;   // chatStream can fire onDone twice; only speak the reply once
     aborts[key] = chatStream(payload, activeProfile, {
       onRun: (runId) => chatStore.patchLast(key, (last) => { last.runId = runId; }),
       onDelta: (d) => chatStore.patchLast(key, (last) => { if (last.streaming) last.content += d; }),
@@ -236,7 +237,7 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
         chatStore.patchLast(key, (last) => { last.streaming = false; if (usage) last.usage = usage; reply = last.content || ""; });
         chatStore.persist();
         delete aborts[key];
-        speakReplyRef.current(reply);   // Voice Mode: speak the answer + resume listening
+        if (!spoke) { spoke = true; speakReplyRef.current(reply); }   // Voice Mode: speak once
       },
       onError: (e) => {
         chatStore.patchLast(key, (last) => { last.content = last.content || `⚠ ${e}`; last.streaming = false; });
