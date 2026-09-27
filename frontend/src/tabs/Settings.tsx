@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { HealthInfo } from "../types";
 import { api, setConnection, getConnection, type ConnectionInfo, type ContentDirInfo, type FleetGroup } from "../api/client";
 import { settings, applySettings, ACCENT_PRESETS } from "../store/settings";
+import { voiceEngineOptions, type EngineId } from "../voice/engine";
 
 // Settings — branding (name, accent, theme), connected Hermes hosts, and connection info.
 // Name + accent are portal-owned and shared across devices (server-persisted); theme is per-viewer
@@ -110,6 +111,9 @@ export function Settings({ health }: { health: HealthInfo | null }) {
 
       {/* per-fleet content libraries */}
       <FleetContentBlock />
+
+      {/* voice mode */}
+      <VoiceBlock />
 
       {/* connection */}
       <section className="card settings-block">
@@ -261,6 +265,45 @@ function ContentDirBlock() {
           </div>
         </>
       )}
+    </section>
+  );
+}
+
+function VoiceBlock() {
+  const [s, setS] = useState(settings.get());
+  useEffect(() => settings.subscribe(() => setS(settings.get())), []);
+  const opts = voiceEngineOptions();
+  return (
+    <section className="card settings-block">
+      <span className="eyebrow block-title">Voice</span>
+      <p className="mono muted block-note">
+        Talk to the fleet from the Chat tab (mic → speech-to-text → your agents → spoken reply). The
+        engine runs in your browser, so this is per-device. More engines (self-hosted whisper/Piper,
+        Hermes realtime) drop in here as they become available.
+      </p>
+      <div className="set-grid">
+        <div className="set-field">
+          <label>Speech engine</label>
+          <select className="model-select mono" value={s.voiceEngine}
+                  onChange={(e) => settings.set({ voiceEngine: e.target.value as EngineId })}>
+            {opts.map((o) => (
+              <option key={o.id} value={o.id} disabled={!o.available}>
+                {o.label}{o.note ? ` — ${o.note}` : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="set-field">
+          <label>Language (BCP-47)</label>
+          <input className="add-input mono" value={s.voiceLang} spellCheck={false} placeholder="en-US"
+                 onChange={(e) => settings.set({ voiceLang: e.target.value })} />
+        </div>
+      </div>
+      <label className="voice-check">
+        <input type="checkbox" checked={s.voiceAutoSpeak}
+               onChange={(e) => settings.set({ voiceAutoSpeak: e.target.checked })} />
+        Speak assistant replies aloud
+      </label>
     </section>
   );
 }

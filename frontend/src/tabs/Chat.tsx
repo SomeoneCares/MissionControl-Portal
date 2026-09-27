@@ -2,6 +2,23 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { State, HealthInfo, Agent } from "../types";
 import { api, chatStream, type ChatMessage, type ChatAgents, type ToolEvent, type Attachment, type ApprovalChoice, type SubagentEvent, type FleetGroupsView } from "../api/client";
 import { chatStore, type Turn } from "../store/chatStore";
+import { settings } from "../store/settings";
+import { getVoiceEngine } from "../voice/engine";
+
+// Flatten markdown/code to something worth speaking aloud: drop fenced code, list/emphasis marks,
+// link syntax, and headings — keep the prose.
+function speakable(md: string): string {
+  return md
+    .replace(/```[\s\S]*?```/g, " code block ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/[*_>#]/g, "")
+    .replace(/\n{2,}/g, ". ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 4000);
+}
 
 // Approval choices arrive as bare strings (Hermes) or objects (older paths). Normalise both to a
 // value we send back and a readable label, and a tone so approve/deny read at a glance.
@@ -71,6 +88,20 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
   const [attachMsg, setAttachMsg] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // ---- Voice Mode ------------------------------------------------------------------------------
+  const [vprefs, setVprefs] = useState(settings.get());
+  useEffect(() => settings.subscribe(() => setVprefs(settings.get())), []);
+  const [voiceMode, setVoiceMode] = useState(false);   // hands-free (continuous listen + auto-send + speak)
+  const [listening, setListening] = useState(false);
+  const [interim, setInterim] = useState("");
+  const [speaking, setSpeaking] = useState(false);
+  const [voiceErr, setVoiceErr] = useState<string | null>(null);
+  const engine = getVoiceEngine(vprefs.voiceEngine);
+  // async speech callbacks call the LATEST handlers via refs, never a stale render's closure
+  const voiceModeRef = useRef(false);
+  const onUtteranceRef = useRef<(t: string) => void>(() => {});
+  const speakReplyRef = useRef<(t: string) => void>(() => {});
 
   const addFiles = async (files: FileList | File[]) => {
     const arr = Array.from(files);
@@ -172,8 +203,8 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
     );
   };
 
-  const send = () => {
-    const text = input.trim();
+  const sendText = (raw: string) => {
+    const text = raw.trim();
     if ((!text && draft.length === 0) || isBusy) return;
     const key = current;
     const atts = draft.map((a) => ({ name: a.name, kind: a.kind }));
@@ -201,9 +232,11 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
       onSubagent: (s) => chatStore.patchLast(key, (last) => { last.subagents = [...(last.subagents ?? []), s]; }),
       onApproval: (a) => chatStore.patchLast(key, (last) => { last.approval = a; }),
       onDone: (usage) => {
-        chatStore.patchLast(key, (last) => { last.streaming = false; if (usage) last.usage = usage; });
+        let reply = "";
+        chatStore.patchLast(key, (last) => { last.streaming = false; if (usage) last.usage = usage; reply = last.content || ""; });
         chatStore.persist();
         delete aborts[key];
+        speakReplyRef.current(reply);   // Voice Mode: speak the answer + resume listening
       },
       onError: (e) => {
         chatStore.patchLast(key, (last) => { last.content = last.content || `⚠ ${e}`; last.streaming = false; });
@@ -212,6 +245,69 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
       },
     }, attachments);
   };
+  const send = () => sendText(input);
+
+  // ---- Voice Mode control ----------------------------------------------------------------------
+  const startListen = () => {
+    setVoiceErr(null); setInterim("");
+    if (!engine.supportsStt()) { setVoiceErr("No speech recognition in this browser — try Chrome or Edge."); return; }
+    setListening(true);
+    engine.startListening(vprefs.voiceLang, voiceModeRef.current, {
+      onPartial: (t) => setInterim(t),
+      onFinal: (t) => { setInterim(""); onUtteranceRef.current(t); },
+      onError: (e) => setVoiceErr(e),
+      onEnd: () => setListening(false),
+    });
+  };
+  const stopListen = () => { engine.stopListening(); setListening(false); setInterim(""); };
+
+  // latest handlers (refs) so async speech callbacks always see current state
+  onUtteranceRef.current = (text: string) => {
+    if (!text.trim()) return;
+    if (engine.isSpeaking()) { engine.cancelSpeak(); setSpeaking(false); }   // barge-in
+    if (voiceModeRef.current) sendText(text);                                 // hands-free → auto-send
+    else setInput((prev) => (prev ? prev + " " : "") + text);                // dictation → into the box
+  };
+  speakReplyRef.current = (reply: string) => {
+    const text = speakable(reply);
+    if (!vprefs.voiceAutoSpeak || !engine.supportsTts() || !text) {
+      if (voiceModeRef.current) startListen();   // nothing to say → keep the conversation going
+      return;
+    }
+    engine.stopListening(); setListening(false);  // don't transcribe our own TTS
+    setSpeaking(true);
+    engine.speak(text, vprefs.voiceLang, () => {
+      setSpeaking(false);
+      if (voiceModeRef.current) startListen();     // resume listening after speaking
+    });
+  };
+
+  const toggleDictation = () => {
+    if (listening && !voiceModeRef.current) { stopListen(); return; }
+    voiceModeRef.current = false; setVoiceMode(false);
+    engine.cancelSpeak(); setSpeaking(false);
+    startListen();
+  };
+  const toggleVoiceMode = () => {
+    if (voiceModeRef.current) {
+      voiceModeRef.current = false; setVoiceMode(false);
+      stopListen(); engine.cancelSpeak(); setSpeaking(false);
+    } else {
+      voiceModeRef.current = true; setVoiceMode(true);
+      startListen();
+    }
+  };
+  const setAutoSpeak = (on: boolean) => {
+    settings.set({ voiceAutoSpeak: on });
+    if (!on) { engine.cancelSpeak(); setSpeaking(false); }
+  };
+
+  // tear down voice when leaving the tab or switching profiles
+  useEffect(() => () => { engine.stopListening(); engine.cancelSpeak(); }, []);
+  useEffect(() => {
+    if (voiceModeRef.current || listening) { stopListen(); engine.cancelSpeak(); setSpeaking(false); voiceModeRef.current = false; setVoiceMode(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current]);
 
   const stop = () => {
     // stop the real run on the gateway, then stop consuming the stream
@@ -372,6 +468,16 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
               {attachMsg && <span className="mono att-note">{attachMsg}</span>}
             </div>
           )}
+          {(listening || speaking || interim || voiceErr) && (
+            <div className={`voice-strip ${listening ? "listening" : ""} ${speaking ? "speaking" : ""}`}>
+              <span className="voice-dot" />
+              <span className="voice-state mono">
+                {speaking ? "speaking…" : listening ? (voiceMode ? "listening · hands-free" : "listening…") : "voice"}
+              </span>
+              {interim && <span className="voice-interim">{interim}</span>}
+              {voiceErr && <span className="voice-err mono">{voiceErr}</span>}
+            </div>
+          )}
           <div className="chat-input-row">
             <button className="chat-attach" onClick={() => fileRef.current?.click()} title="Attach files" aria-label="Attach files">＋</button>
             <input
@@ -392,6 +498,12 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
               }}
               rows={1}
             />
+            <button className={`voice-btn ${listening && !voiceMode ? "on" : ""}`} onClick={toggleDictation}
+                    disabled={!engine.supportsStt()} title="Dictate — fills the box" aria-label="Dictate">🎤</button>
+            <button className={`voice-btn ${voiceMode ? "on" : ""}`} onClick={toggleVoiceMode}
+                    disabled={!engine.supportsStt()} title="Hands-free voice mode" aria-label="Voice mode">🎧</button>
+            <button className={`voice-btn ${vprefs.voiceAutoSpeak ? "on" : ""}`} onClick={() => setAutoSpeak(!vprefs.voiceAutoSpeak)}
+                    disabled={!engine.supportsTts()} title={vprefs.voiceAutoSpeak ? "Mute replies" : "Speak replies"} aria-label="Speak replies">{vprefs.voiceAutoSpeak ? "🔊" : "🔇"}</button>
             {isBusy ? (
               <button className="btn-primary" onClick={stop}>Stop</button>
             ) : (

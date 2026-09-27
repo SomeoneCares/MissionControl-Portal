@@ -5,13 +5,22 @@
 
 const KEY = "hermes-mc-settings-v1";
 
+import type { EngineId } from "../voice/engine";
+
 export interface Settings {
   portalName: string;   // "" = default "Hermes"
   accent: string;       // "" = the built-in ember; else a hex the accent is set to
   theme: "system" | "light" | "dark";
+  // Voice Mode — per-viewer (depends on this browser's mic/speech support), never shared.
+  voiceEngine: EngineId;
+  voiceLang: string;      // BCP-47, e.g. "en-US"
+  voiceAutoSpeak: boolean; // speak assistant replies aloud
 }
 
-const DEFAULTS: Settings = { portalName: "", accent: "", theme: "system" };
+const DEFAULTS: Settings = {
+  portalName: "", accent: "", theme: "system",
+  voiceEngine: "web-speech", voiceLang: "en-US", voiceAutoSpeak: true,
+};
 
 let current: Settings = load();
 const listeners = new Set<() => void>();
