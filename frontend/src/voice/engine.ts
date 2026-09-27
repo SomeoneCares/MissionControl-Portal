@@ -144,6 +144,8 @@ let shStatus: { tts: boolean; stt: boolean; voices: VoiceInfo[]; whisperModels: 
   { tts: false, stt: false, voices: [], whisperModels: [], whisperDefault: "" };
 let sttModel = "";   // chosen whisper model (empty → the backend default)
 export function setSttModel(m: string) { sttModel = m || ""; }
+let sttLang = "";    // "" / "auto" → constrained EN/AR auto-detect; "en" / "ar" → forced
+export function setSttLang(m: string) { sttLang = m === "en" || m === "ar" ? m : ""; }
 export function whisperModels(): WhisperModelInfo[] { return shStatus.whisperModels; }
 export async function refreshVoiceStatus(): Promise<void> {
   try {
@@ -206,8 +208,11 @@ class SelfHostedEngine implements VoiceEngine {
       const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
       if (blob.size > 1400 && !this.stopped) {
         try {
-          const url = "/api/voice/transcribe" + (sttModel ? "?model=" + encodeURIComponent(sttModel) : "");
-          const r = await fetch(url, {
+          const params = new URLSearchParams();
+          if (sttModel) params.set("model", sttModel);
+          if (sttLang) params.set("lang", sttLang);
+          const q = params.toString();
+          const r = await fetch("/api/voice/transcribe" + (q ? "?" + q : ""), {
             method: "POST", credentials: "same-origin",
             headers: { "Content-Type": blob.type }, body: blob });
           if (r.ok) { const d = await r.json(); const text = (d.text || "").trim(); if (text) this.h?.onFinal(text); }

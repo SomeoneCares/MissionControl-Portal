@@ -3,7 +3,7 @@ import type { State, HealthInfo, Agent } from "../types";
 import { api, chatStream, type ChatMessage, type ChatAgents, type ToolEvent, type Attachment, type ApprovalChoice, type SubagentEvent, type FleetGroupsView } from "../api/client";
 import { chatStore, type Turn } from "../store/chatStore";
 import { settings } from "../store/settings";
-import { getVoiceEngine, refreshVoiceStatus, setSttModel } from "../voice/engine";
+import { getVoiceEngine, refreshVoiceStatus, setSttModel, setSttLang } from "../voice/engine";
 
 // Split newly-arrived reply text into complete sentences (at . ! ? ؟ ۔ or newline) so a streaming
 // answer can be spoken sentence-by-sentence. Returns the chunks and how far into `text` they consume.
@@ -105,6 +105,7 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
   useEffect(() => settings.subscribe(() => setVprefs(settings.get())), []);
   useEffect(() => { refreshVoiceStatus().then(() => setVprefs(settings.get())); }, []);   // learn backend STT/TTS
   useEffect(() => { setSttModel(vprefs.voiceWhisperModel); }, [vprefs.voiceWhisperModel]);   // whisper model choice
+  useEffect(() => { setSttLang(vprefs.voiceLangMode); }, [vprefs.voiceLangMode]);             // STT language mode
   const [voiceMode, setVoiceMode] = useState(false);   // hands-free (continuous listen + auto-send + speak)
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState("");
@@ -521,6 +522,17 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
               }}
               rows={1}
             />
+            {engine.id === "self-hosted" && engine.supportsStt() && (
+              <div className="lang-seg mono" title="Speech language">
+                {(["auto", "en", "ar"] as const).map((m) => (
+                  <button key={m} className={`lang-seg-btn ${vprefs.voiceLangMode === m ? "on" : ""}`}
+                          onClick={() => settings.set({ voiceLangMode: m })}
+                          title={m === "auto" ? "Auto (English/Arabic)" : m === "en" ? "English" : "Arabic"}>
+                    {m === "auto" ? "A" : m === "en" ? "EN" : "ع"}
+                  </button>
+                ))}
+              </div>
+            )}
             <button className={`voice-btn ${listening && !voiceMode ? "on" : ""}`} onClick={toggleDictation}
                     disabled={!engine.supportsStt()} title="Dictate — fills the box" aria-label="Dictate">🎤</button>
             <button className={`voice-btn ${voiceMode ? "on" : ""}`} onClick={toggleVoiceMode}

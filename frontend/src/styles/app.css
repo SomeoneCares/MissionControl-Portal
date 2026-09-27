@@ -348,6 +348,10 @@
 .voice-err { color: var(--danger); font-size: 11px; }
 .voice-check { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-soft); cursor: pointer; }
 .voice-check input { accent-color: var(--ember); width: 15px; height: 15px; }
+.lang-seg { display: inline-flex; align-self: flex-end; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--panel-2); flex: none; }
+.lang-seg-btn { border: none; background: transparent; color: var(--muted); font-size: 11px; padding: 0 9px; height: 40px; cursor: pointer; letter-spacing: 0.04em; }
+.lang-seg-btn:hover { color: var(--ink); }
+.lang-seg-btn.on { background: var(--ember); color: #fff; }
 
 /* ===== approvals ===== */
 .approval { align-self: flex-start; max-width: 80%; margin-top: 6px; border: 1px solid var(--warn); border-radius: 12px; background: var(--warn-bg); padding: 12px; }

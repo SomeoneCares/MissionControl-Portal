@@ -20,6 +20,7 @@ export interface Settings {
   voiceNameEn: string;     // self-hosted: English voice
   voiceNameAr: string;     // self-hosted: Arabic (Egyptian) voice
   voiceWhisperModel: string; // self-hosted STT model ("" → backend default)
+  voiceLangMode: "auto" | "en" | "ar";  // STT language: constrained-auto or forced
 }
 
 const DEFAULTS: Settings = {
@@ -27,7 +28,7 @@ const DEFAULTS: Settings = {
   voiceEngine: "web-speech", voiceLang: "en-US", voiceAutoSpeak: true,
   voiceName: "", voiceRate: 1,
   voiceNameEn: "en-US-AriaNeural", voiceNameAr: "ar-EG-SalmaNeural",
-  voiceWhisperModel: "large-v3-turbo",
+  voiceWhisperModel: "large-v3-turbo", voiceLangMode: "auto",
 };
 
 let current: Settings = load();

@@ -107,22 +107,38 @@ def _load(name: str):
     return m
 
 
-def transcribe(audio: bytes, suffix: str = ".webm", model: str = "") -> dict:
-    """audio bytes → {"text", "lang", "model"} via whisper (language auto-detected)."""
+def transcribe(audio: bytes, suffix: str = ".webm", model: str = "", lang: str = "") -> dict:
+    """audio bytes → {"text", "lang", "model"} via whisper.
+
+    ``lang`` = "en"/"ar" forces that language (no detection — the reliable path); "" / "auto"
+    auto-detects but **constrained to English vs Arabic** so a short English clip can't be mistaken
+    for Persian/Urdu/etc. and rendered in the wrong script.
+    """
     name = (model or DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    forced = lang if lang in ("en", "ar") else None
     tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
     tmp.write(audio)
     tmp.close()
     try:
         try:
             m = _load(name)
-            segments, info = m.transcribe(tmp.name, language=None, vad_filter=True)
-            text = "".join(seg.text for seg in segments).strip()
+
+            def run(force):
+                segs, info = m.transcribe(tmp.name, language=force, vad_filter=True)
+                return "".join(s.text for s in segs).strip(), info
+
+            text, info = run(forced)
+            if forced is None:
+                probs = dict(getattr(info, "all_language_probs", None) or [])
+                if probs:
+                    chosen = "en" if probs.get("en", 0.0) >= probs.get("ar", 0.0) else "ar"
+                    if chosen != (getattr(info, "language", "") or ""):
+                        text, info = run(chosen)   # redo, constrained to EN/AR
             return {"text": text, "lang": getattr(info, "language", "") or "", "model": name}
         except ImportError:
             import whisper
             wm = whisper.load_model(name if name in ("tiny", "base", "small", "medium", "large") else "base")
-            r = wm.transcribe(tmp.name)
+            r = wm.transcribe(tmp.name, language=forced)
             return {"text": (r.get("text") or "").strip(), "lang": r.get("language") or "", "model": name}
     finally:
         try:
