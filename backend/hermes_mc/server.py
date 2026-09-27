@@ -36,6 +36,7 @@ from .kanban import KanbanSource, KanbanError
 from .connections import ConnectionRegistry
 from .fleets import FleetGroups
 from . import content_preview
+from . import voice_synth
 from .gateway import GatewayClient, GatewayError
 from .local_source import LocalSource
 
@@ -550,6 +551,17 @@ class Handler(BaseHTTPRequestHandler):
 
     _MAX_BODY = 32 * 1024 * 1024  # 32 MB — generous for base64 image attachments, but bounded
 
+    def _read_raw_body(self) -> bytes:
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return b""
+        if length <= 0 or length > self._MAX_BODY:
+            if length > self._MAX_BODY:
+                self.rfile.read(min(length, self._MAX_BODY))
+            return b""
+        return self.rfile.read(length)
+
     def _read_body(self) -> dict:
         try:
             length = int(self.headers.get("Content-Length") or 0)
@@ -599,6 +611,8 @@ class Handler(BaseHTTPRequestHandler):
             })
         if path == "/api/capabilities":
             return self._json(self.provider.capabilities())
+        if path == "/api/voice/status":
+            return self._json(voice_synth.status())
         if path == "/api/toolsets":
             return self._json({"data": self.provider.toolsets()})
         if path == "/api/skills":
@@ -729,6 +743,18 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if not self._gate(path):
             return
+        if path == "/api/voice/transcribe":   # raw audio body → read before the JSON parser
+            audio = self._read_raw_body()
+            if not audio:
+                return self._json({"error": "no audio"}, status=400)
+            if not voice_synth.stt_available():
+                return self._json({"error": "whisper is not installed on the host"}, status=501)
+            ctype = self.headers.get("Content-Type", "")
+            suffix = ".wav" if "wav" in ctype else ".ogg" if "ogg" in ctype else ".webm"
+            try:
+                return self._json(voice_synth.transcribe(audio, suffix))
+            except Exception as e:
+                return self._json({"error": str(e)[:300]}, status=500)
         body = self._read_body()
         if path == "/api/auth/login":
             return self._handle_login(body)
@@ -736,6 +762,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._handle_logout()
         if path == "/api/auth/password":
             return self._handle_password_change(body)
+        if path == "/api/voice/speak":
+            if not voice_synth.tts_available():
+                return self._json({"error": "edge-tts is not installed on the host"}, status=501)
+            try:
+                data = voice_synth.synthesize(body.get("text", ""), body.get("voice", ""), body.get("rate", "+0%"))
+            except Exception as e:
+                return self._json({"error": str(e)[:300]}, status=500)
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/mpeg")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if self.registry is not None:
             self.provider = self.registry.provider(self._connection_id())
         if path == "/api/connections":

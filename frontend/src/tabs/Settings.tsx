@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { HealthInfo } from "../types";
 import { api, setConnection, getConnection, type ConnectionInfo, type ContentDirInfo, type FleetGroup } from "../api/client";
 import { settings, applySettings, ACCENT_PRESETS } from "../store/settings";
-import { voiceEngineOptions, getVoiceEngine, type EngineId, type VoiceInfo } from "../voice/engine";
+import { voiceEngineOptions, getVoiceEngine, refreshVoiceStatus, type EngineId, type VoiceInfo } from "../voice/engine";
 
 // Settings — branding (name, accent, theme), connected Hermes hosts, and connection info.
 // Name + accent are portal-owned and shared across devices (server-persisted); theme is per-viewer
@@ -274,25 +274,32 @@ function VoiceBlock() {
   useEffect(() => settings.subscribe(() => setS(settings.get())), []);
   const opts = voiceEngineOptions();
   const engine = getVoiceEngine(s.voiceEngine);
+  const selfHosted = s.voiceEngine === "self-hosted";
   const [voices, setVoices] = useState<VoiceInfo[]>(engine.voices());
   useEffect(() => {
-    const refresh = () => setVoices(getVoiceEngine(settings.get().voiceEngine).voices());
-    refresh();   // browsers load voices async → also refresh on voiceschanged
+    let alive = true;
+    const refresh = () => { if (alive) setVoices(getVoiceEngine(settings.get().voiceEngine).voices()); };
+    refreshVoiceStatus().then(() => { refresh(); if (alive) setS(settings.get()); });  // backend edge voices
+    refresh();
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.addEventListener("voiceschanged", refresh);
-      return () => window.speechSynthesis.removeEventListener("voiceschanged", refresh);
+      return () => { alive = false; window.speechSynthesis.removeEventListener("voiceschanged", refresh); };
     }
+    return () => { alive = false; };
   }, [s.voiceEngine]);
-  const test = () => engine.speak(
-    "Hi — this is how I'll read the fleet's replies.",
-    { lang: s.voiceLang, voiceURI: s.voiceName || undefined, rate: s.voiceRate });
+
+  const en = voices.filter((v) => v.lang.toLowerCase().startsWith("en"));
+  const ar = voices.filter((v) => v.lang.toLowerCase().startsWith("ar"));
+  const speak = (text: string, voiceURI?: string, arVoiceURI?: string) =>
+    engine.speak(text, { lang: s.voiceLang, voiceURI, arVoiceURI, rate: s.voiceRate });
+
   return (
     <section className="card settings-block">
       <span className="eyebrow block-title">Voice</span>
       <p className="mono muted block-note">
-        Talk to the fleet from the Chat tab (mic → speech-to-text → your agents → spoken reply). The
-        engine runs in your browser, so this is per-device. More engines (self-hosted whisper/Piper,
-        Hermes realtime) drop in here as they become available.
+        Talk to the fleet from the Chat tab (mic → speech-to-text → your agents → spoken reply), per
+        device. The <b>self-hosted</b> engine (whisper + Edge TTS) auto-detects English vs Egyptian
+        Arabic and answers in the same language and voice.
       </p>
       <div className="set-grid">
         <div className="set-field">
@@ -307,39 +314,63 @@ function VoiceBlock() {
           </select>
         </div>
         <div className="set-field">
-          <label>Language (BCP-47)</label>
-          <input className="add-input mono" value={s.voiceLang} spellCheck={false} placeholder="en-US"
-                 onChange={(e) => settings.set({ voiceLang: e.target.value })} />
+          <label>Speaking rate · {s.voiceRate.toFixed(1)}×</label>
+          <input type="range" min="0.6" max="1.6" step="0.1" value={s.voiceRate}
+                 onChange={(e) => settings.set({ voiceRate: parseFloat(e.target.value) })} />
         </div>
       </div>
-      {voices.length > 0 && (
-        <div className="set-field">
-          <label>Voice</label>
-          <select className="model-select mono" value={s.voiceName}
-                  onChange={(e) => settings.set({ voiceName: e.target.value })}>
-            <option value="">Browser default</option>
-            {voices.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
-          </select>
+
+      {selfHosted ? (
+        <div className="set-grid">
+          <div className="set-field">
+            <label>English voice</label>
+            <select className="model-select mono" value={s.voiceNameEn}
+                    onChange={(e) => settings.set({ voiceNameEn: e.target.value })}>
+              {en.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+            </select>
+            {en.length > 0 && <button className="content-tool" onClick={() => speak("Hello — this is the English voice.", s.voiceNameEn)}>Test English</button>}
+          </div>
+          <div className="set-field">
+            <label>Arabic (Egyptian) voice</label>
+            <select className="model-select mono" value={s.voiceNameAr}
+                    onChange={(e) => settings.set({ voiceNameAr: e.target.value })}>
+              {ar.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+            </select>
+            {ar.length > 0 && <button className="content-tool" onClick={() => speak("أهلاً، دي النغمة المصري اللي هترد بيها.", undefined, s.voiceNameAr)}>Test Arabic</button>}
+          </div>
         </div>
+      ) : (
+        voices.length > 0 && (
+          <div className="set-field">
+            <label>Voice</label>
+            <select className="model-select mono" value={s.voiceName}
+                    onChange={(e) => settings.set({ voiceName: e.target.value })}>
+              <option value="">Browser default</option>
+              {voices.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+            </select>
+            {engine.supportsTts() && <button className="content-tool" onClick={() => speak("Hi — this is how I'll read the fleet's replies.", s.voiceName || undefined)}>Test voice</button>}
+          </div>
+        )
       )}
-      <div className="set-field">
-        <label>Speaking rate · {s.voiceRate.toFixed(1)}×</label>
-        <input type="range" min="0.6" max="1.6" step="0.1" value={s.voiceRate}
-               onChange={(e) => settings.set({ voiceRate: parseFloat(e.target.value) })} />
-      </div>
-      <div className="dir-actions">
-        <label className="voice-check">
-          <input type="checkbox" checked={s.voiceAutoSpeak}
-                 onChange={(e) => settings.set({ voiceAutoSpeak: e.target.checked })} />
-          Speak assistant replies aloud
-        </label>
-        {engine.supportsTts() && <button className="content-tool" onClick={test}>Test voice</button>}
-      </div>
-      <p className="mono muted block-note">
-        Tip: a voice marked <code>online</code> (e.g. a Google voice in Chrome) usually sounds far
-        more natural than the local system voice. For a desktop-app-quality voice, the self-hosted
-        Piper engine is next.
-      </p>
+
+      <label className="voice-check">
+        <input type="checkbox" checked={s.voiceAutoSpeak}
+               onChange={(e) => settings.set({ voiceAutoSpeak: e.target.checked })} />
+        Speak assistant replies aloud
+      </label>
+
+      {selfHosted && !engine.supportsStt() && (
+        <p className="mono warn-text block-note">
+          The mic (speech-to-text) needs whisper on the host — install it, then restart the portal:
+          <br /><code>pip install --user --break-system-packages faster-whisper edge-tts</code>
+        </p>
+      )}
+      {!selfHosted && (
+        <p className="mono muted block-note">
+          Tip: a voice marked <code>online</code> (a Google voice in Chrome) sounds better than the
+          local system voice. For natural English + Egyptian Arabic, switch to the self-hosted engine.
+        </p>
+      )}
     </section>
   );
 }

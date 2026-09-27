@@ -15,14 +15,17 @@ export interface Settings {
   voiceEngine: EngineId;
   voiceLang: string;      // BCP-47, e.g. "en-US"
   voiceAutoSpeak: boolean; // speak assistant replies aloud
-  voiceName: string;       // chosen TTS voiceURI ("" = browser default)
+  voiceName: string;       // web-speech: chosen browser voiceURI ("" = default)
   voiceRate: number;       // speaking rate, 0.5–2 (1 = normal)
+  voiceNameEn: string;     // self-hosted: English voice
+  voiceNameAr: string;     // self-hosted: Arabic (Egyptian) voice
 }
 
 const DEFAULTS: Settings = {
   portalName: "", accent: "", theme: "system",
   voiceEngine: "web-speech", voiceLang: "en-US", voiceAutoSpeak: true,
   voiceName: "", voiceRate: 1,
+  voiceNameEn: "en-US-AriaNeural", voiceNameAr: "ar-EG-SalmaNeural",
 };
 
 let current: Settings = load();
