@@ -5,6 +5,17 @@ import { chatStore, type Turn } from "../store/chatStore";
 import { settings } from "../store/settings";
 import { getVoiceEngine, refreshVoiceStatus, setSttModel } from "../voice/engine";
 
+// Split newly-arrived reply text into complete sentences (at . ! ? ؟ ۔ or newline) so a streaming
+// answer can be spoken sentence-by-sentence. Returns the chunks and how far into `text` they consume.
+function nextSentences(text: string, from: number): { chunks: string[]; upto: number } {
+  const boundaries = [...text.slice(from).matchAll(/[.!?؟۔\n]+/g)];
+  if (!boundaries.length) return { chunks: [], upto: from };
+  const last = boundaries[boundaries.length - 1];
+  const end = from + ((last.index ?? 0) + last[0].length);
+  const chunks = text.slice(from, end).split(/(?<=[.!?؟۔\n])/).map((s) => s.trim()).filter(Boolean);
+  return { chunks, upto: end };
+}
+
 // Flatten markdown/code to something worth speaking aloud: drop fenced code, list/emphasis marks,
 // link syntax, and headings — keep the prose.
 function speakable(md: string): string {
@@ -103,7 +114,6 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
   // async speech callbacks call the LATEST handlers via refs, never a stale render's closure
   const voiceModeRef = useRef(false);
   const onUtteranceRef = useRef<(t: string) => void>(() => {});
-  const speakReplyRef = useRef<(t: string) => void>(() => {});
 
   const addFiles = async (files: FileList | File[]) => {
     const arr = Array.from(files);
@@ -220,10 +230,28 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
     setAttachMsg(null);
 
     const payload: ChatMessage[] = history.map((t) => ({ role: t.role, content: t.content }));
-    let spoke = false;   // chatStream can fire onDone twice; only speak the reply once
+    let spoke = false;   // chatStream can fire onDone twice; only finish speaking once
+    // streaming TTS: speak sentences as they arrive so long answers start sooner
+    const speakActive = vprefs.voiceAutoSpeak && engine.supportsTts();
+    const enVoice = engine.id === "self-hosted" ? vprefs.voiceNameEn : (vprefs.voiceName || undefined);
+    const sOpts = { lang: vprefs.voiceLang, voiceURI: enVoice, arVoiceURI: vprefs.voiceNameAr, rate: vprefs.voiceRate };
+    let acc = "", spokenUpto = 0, spokeStarted = false;
+    const enqueueVoice = (chunk: string) => {
+      const t = speakable(chunk);
+      if (!t) return;
+      if (!spokeStarted) { engine.stopListening(); setListening(false); setSpeaking(true); spokeStarted = true; }
+      engine.enqueueSpeak(t, sOpts);
+    };
     aborts[key] = chatStream(payload, activeProfile, {
       onRun: (runId) => chatStore.patchLast(key, (last) => { last.runId = runId; }),
-      onDelta: (d) => chatStore.patchLast(key, (last) => { if (last.streaming) last.content += d; }),
+      onDelta: (d) => {
+        chatStore.patchLast(key, (last) => { if (last.streaming) last.content += d; });
+        if (speakActive) {
+          acc += d;
+          const { chunks, upto } = nextSentences(acc, spokenUpto);
+          if (upto > spokenUpto) { chunks.forEach(enqueueVoice); spokenUpto = upto; }
+        }
+      },
       onReasoning: (text) => chatStore.patchLast(key, (last) => {
         // accumulate reasoning blocks: keep the full chain of thought rather than replacing.
         const prev = last.reasoning || "";
@@ -235,11 +263,17 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
       onSubagent: (s) => chatStore.patchLast(key, (last) => { last.subagents = [...(last.subagents ?? []), s]; }),
       onApproval: (a) => chatStore.patchLast(key, (last) => { last.approval = a; }),
       onDone: (usage) => {
-        let reply = "";
-        chatStore.patchLast(key, (last) => { last.streaming = false; if (usage) last.usage = usage; reply = last.content || ""; });
+        chatStore.patchLast(key, (last) => { last.streaming = false; if (usage) last.usage = usage; });
         chatStore.persist();
         delete aborts[key];
-        if (!spoke) { spoke = true; speakReplyRef.current(reply); }   // Voice Mode: speak once
+        if (spoke) return;
+        spoke = true;
+        if (speakActive) {
+          const tail = acc.slice(spokenUpto).trim();
+          if (tail) enqueueVoice(tail);                 // speak whatever's left after the last boundary
+          if (spokeStarted) engine.finishSpeak(() => { setSpeaking(false); if (voiceModeRef.current) startListen(); });
+          else if (voiceModeRef.current) startListen(); // nothing to speak → keep the conversation going
+        } else if (voiceModeRef.current) startListen();
       },
       onError: (e) => {
         chatStore.patchLast(key, (last) => { last.content = last.content || `⚠ ${e}`; last.streaming = false; });
@@ -271,21 +305,6 @@ export function Chat({ state, health }: { state: State; health: HealthInfo | nul
     if (voiceModeRef.current) sendText(text);                                 // hands-free → auto-send
     else setInput((prev) => (prev ? prev + " " : "") + text);                // dictation → into the box
   };
-  speakReplyRef.current = (reply: string) => {
-    const text = speakable(reply);
-    if (!vprefs.voiceAutoSpeak || !engine.supportsTts() || !text) {
-      if (voiceModeRef.current) startListen();   // nothing to say → keep the conversation going
-      return;
-    }
-    engine.stopListening(); setListening(false);  // don't transcribe our own TTS
-    setSpeaking(true);
-    const enVoice = engine.id === "self-hosted" ? vprefs.voiceNameEn : (vprefs.voiceName || undefined);
-    engine.speak(text, { lang: vprefs.voiceLang, voiceURI: enVoice, arVoiceURI: vprefs.voiceNameAr, rate: vprefs.voiceRate }, () => {
-      setSpeaking(false);
-      if (voiceModeRef.current) startListen();     // resume listening after speaking
-    });
-  };
-
   const toggleDictation = () => {
     if (listening && !voiceModeRef.current) { stopListen(); return; }
     voiceModeRef.current = false; setVoiceMode(false);

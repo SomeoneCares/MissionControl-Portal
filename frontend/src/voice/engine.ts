@@ -31,7 +31,11 @@ export interface VoiceEngine {
   voices(): VoiceInfo[];                 // available TTS voices for the picker (may be empty)
   startListening(lang: string, continuous: boolean, h: ListenHandlers): void;
   stopListening(): void;
-  speak(text: string, opts: SpeakOptions, onEnd?: () => void): void;
+  speak(text: string, opts: SpeakOptions, onEnd?: () => void): void;   // one-shot (Test / previews)
+  // streaming TTS: enqueue sentences as they arrive; finishSpeak marks the end and fires onDrained
+  // once the queue empties — so speaking can start after the first sentence, not the whole reply.
+  enqueueSpeak(text: string, opts: SpeakOptions): void;
+  finishSpeak(onDrained: () => void): void;
   cancelSpeak(): void;
   isSpeaking(): boolean;
 }
@@ -104,8 +108,30 @@ class WebSpeechEngine implements VoiceEngine {
     u.onerror = () => onEnd?.();
     window.speechSynthesis.speak(u);
   }
+  enqueueSpeak(text: string, opts: SpeakOptions) {
+    if (!this.supportsTts() || !text.trim()) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = opts.lang || "en-US";
+    if (opts.rate) u.rate = opts.rate;
+    if (opts.pitch) u.pitch = opts.pitch;
+    if (opts.voiceURI) {
+      const v = window.speechSynthesis.getVoices().find((x) => x.voiceURI === opts.voiceURI);
+      if (v) u.voice = v;
+    }
+    window.speechSynthesis.speak(u);   // native queue: sentences play in order
+  }
+  finishSpeak(onDrained: () => void) {
+    if (!this.supportsTts()) { onDrained(); return; }
+    const ss = window.speechSynthesis;
+    let tries = 0;
+    const check = () => {
+      if ((!ss.speaking && !ss.pending) || tries > 800) onDrained();
+      else { tries++; setTimeout(check, 150); }
+    };
+    check();
+  }
   cancelSpeak() { if (this.supportsTts()) window.speechSynthesis.cancel(); }
-  isSpeaking() { return this.supportsTts() && window.speechSynthesis.speaking; }
+  isSpeaking() { return this.supportsTts() && (window.speechSynthesis.speaking || window.speechSynthesis.pending); }
 }
 
 // --- Self-hosted (whisper STT + Edge TTS via the portal backend) ---------------------------------
@@ -147,6 +173,13 @@ class SelfHostedEngine implements VoiceEngine {
   private continuous = false;
   private stopped = false;
   private h: ListenHandlers | null = null;
+  // streaming TTS queue
+  private queue: { text: string; opts: SpeakOptions }[] = [];
+  private nextAudio: Promise<HTMLAudioElement | null> | null = null;
+  private playing = false;
+  private finishing = false;
+  private onDrained: (() => void) | null = null;
+  private gen = 0;
 
   supportsStt() { return shStatus.stt; }
   supportsTts() { return shStatus.tts; }
@@ -246,8 +279,59 @@ class SelfHostedEngine implements VoiceEngine {
       })
       .catch(() => onEnd?.());
   }
-  cancelSpeak() { if (this.audio) { try { this.audio.pause(); } catch { /* ignore */ } this.audio = null; } }
-  isSpeaking() { return !!this.audio && !this.audio.paused; }
+  private async synth(item: { text: string; opts: SpeakOptions }): Promise<HTMLAudioElement | null> {
+    try {
+      const voice = hasArabic(item.text) ? (item.opts.arVoiceURI || "ar-EG-SalmaNeural") : (item.opts.voiceURI || "en-US-AriaNeural");
+      const pct = Math.round(((item.opts.rate ?? 1) - 1) * 100);
+      const rate = (pct >= 0 ? "+" : "") + pct + "%";
+      const r = await fetch("/api/voice/speak", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: item.text, voice, rate }) });
+      if (!r.ok) return null;
+      const blob = await r.blob();
+      return new Audio(URL.createObjectURL(blob));
+    } catch { return null; }
+  }
+  enqueueSpeak(text: string, opts: SpeakOptions) {
+    if (!shStatus.tts || !text.trim()) return;
+    this.queue.push({ text, opts });
+    this.pump();
+  }
+  private async pump() {
+    if (this.playing) return;
+    this.playing = true;
+    const myGen = this.gen;
+    while (this.gen === myGen) {
+      let audioP = this.nextAudio; this.nextAudio = null;
+      if (!audioP) { const item = this.queue.shift(); if (!item) break; audioP = this.synth(item); }
+      const following = this.queue.shift();               // prefetch next while this plays
+      if (following) this.nextAudio = this.synth(following);
+      const a = await audioP;
+      if (this.gen !== myGen) { if (a) { try { URL.revokeObjectURL(a.src); } catch { /* */ } } break; }
+      if (a) {
+        this.audio = a;
+        await new Promise<void>((res) => { a.onended = () => res(); a.onerror = () => res(); a.play().catch(() => res()); });
+        try { URL.revokeObjectURL(a.src); } catch { /* */ }
+        this.audio = null;
+      }
+    }
+    if (this.gen === myGen) {
+      this.playing = false;
+      if (this.finishing && !this.queue.length && !this.nextAudio) this.drainSpeak();
+    }
+  }
+  finishSpeak(onDrained: () => void) {
+    this.finishing = true; this.onDrained = onDrained;
+    if (!this.playing && !this.queue.length && !this.nextAudio) this.drainSpeak();
+  }
+  private drainSpeak() { this.finishing = false; const cb = this.onDrained; this.onDrained = null; cb?.(); }
+
+  cancelSpeak() {
+    this.gen++; this.queue = []; this.nextAudio = null; this.finishing = false; this.onDrained = null; this.playing = false;
+    if (this.audio) { try { this.audio.pause(); URL.revokeObjectURL(this.audio.src); } catch { /* ignore */ } this.audio = null; }
+  }
+  isSpeaking() { return this.playing || (!!this.audio && !this.audio.paused); }
 }
 
 const ENGINES: Partial<Record<EngineId, VoiceEngine>> = {
