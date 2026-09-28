@@ -16,8 +16,13 @@ for the live half.
 ```bash
 git clone <this-repo> hermes-mission-control
 cd hermes-mission-control
-installer/install.sh --content-deps      # builds the UI, installs a service, prints the URL
+installer/install.sh --all-deps --enable-chat   # build UI + all deps + wire Chat, install service, print URL
 ```
+
+`--all-deps` adds the optional document (PDF/Word/preview) **and** Voice Mode (whisper + edge-tts)
+extras; `--enable-chat` (local Hermes only) turns on the gateway API, propagates its key to every
+profile for per-agent multiplexing, and restarts the gateway. Drop either flag for a leaner install
+(`-h` lists them all; `--update-hermes` runs `hermes update` first).
 
 Then open `http://<host-ip>:51770` and sign in with **admin / admin** (change it in Settings →
 Access). Prefer to run it yourself? `installer/install.sh --no-service` then

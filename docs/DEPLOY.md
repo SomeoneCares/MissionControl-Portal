@@ -7,7 +7,9 @@ fresh-host install and a smoke-test checklist for the first run.
 > **Version note.** The portal reads Hermes' on-disk state (`~/.hermes/kanban.db`,
 > `agent-logs.db`, `gateway_state.json`) and the gateway's `/p/<profile>/…` endpoints. It is
 > developed against **hermes-agent 0.21.x**. On a different major/minor, watch the Runs, Tasks,
-> and Chat surfaces first — schema/endpoint drift shows up there. Confirm with `hermes --version`.
+> and Chat surfaces first — schema/endpoint drift shows up there. Confirm with `hermes --version`;
+> the installer prints a warning when the minor is outside 0.21. To bring the host up first, run
+> `hermes update` (or pass `--update-hermes` to the installer).
 
 ---
 
@@ -21,6 +23,9 @@ fresh-host install and a smoke-test checklist for the first run.
 - *Optional, for the in-reader document preview* (rendered page images): `poppler-utils`
   (`pdftoppm`, small — needed for **PDF** preview) and **LibreOffice** (`soffice`, large — needed
   for **DOCX/PPTX/XLSX** preview). Without them the reader falls back to a download link.
+- *Optional, for Voice Mode's self-hosted engine:* `faster-whisper` (STT) and `edge-tts` (neural
+  TTS, en-US + ar-EG) via pip. `edge-tts` needs outbound network; the browser mic needs a **secure
+  context** (localhost or HTTPS). Absent, Voice Mode still works via the browser web-speech engine.
 
 ---
 
@@ -29,18 +34,27 @@ fresh-host install and a smoke-test checklist for the first run.
 ```bash
 git clone <this-repo> hermes-mission-control
 cd hermes-mission-control
-installer/install.sh --content-deps
+# on a Hermes host, the fullest one-liner: all optional deps + wire Chat
+installer/install.sh --all-deps --enable-chat
 ```
 
-`install.sh` builds the front end, (with `--content-deps`) installs the optional extras, sets up a
-service, and prints the URL. Flags:
+`install.sh` builds the front end, installs whichever optional extras you ask for, (with
+`--enable-chat`) wires the local Hermes gateway for Chat, sets up a service, and prints the URL.
+Flags:
 
 | Flag | Effect |
 | :-- | :-- |
-| `--content-deps` | also pip-install the PDF/Word extras (and check for `pandoc`) |
+| `--content-deps` | pip-install the PDF/Word extras (and check for `pandoc`, `pdftoppm`, LibreOffice) |
+| `--voice-deps` | pip-install Voice Mode's self-hosted engine (`faster-whisper` + `edge-tts`) |
+| `--all-deps` | both dependency sets above |
+| `--enable-chat` | on a **local** Hermes host: enable the gateway API + key, propagate the key to every profile (per-agent multiplexing), and restart the gateway |
+| `--update-hermes` | run `hermes update` first, to bring the host to the latest Hermes |
 | `--system` | install a **system-wide** systemd unit (needs `sudo`) instead of a `--user` unit |
 | `--no-service` | just build — run it yourself with `installer/run-portal.sh` |
 | `--no-build` | skip the front-end build (requires an existing `frontend/dist`) |
+
+Re-running the installer is safe (idempotent): it rebuilds the front end, re-syncs deps, and
+restarts the service so new code and any gateway-key change take effect.
 
 Environment (all optional): `HMC_HOST` (default `0.0.0.0`), `HMC_PORT` (default `51770`).
 
@@ -96,7 +110,12 @@ gateway; full read/write needs local mode or the host-side bridge.
 
 On a fresh Hermes host the gateway API is usually **off**, so the portal honestly shows
 "gateway down" and Chat is unavailable — everything else (Overview, Agents, Runs, Tasks, Content)
-works without it. To turn Chat on, on the **Hermes host**:
+works without it.
+
+**The easy path:** on a local Hermes host, `installer/install.sh --enable-chat` does all of the
+below for you (enable the API server, generate a key if missing, propagate it to every profile for
+per-agent multiplexing, restart the gateway, then restart the portal). The manual steps follow for
+reference or for remote hosts.
 
 ```bash
 # 1. enable the API server and give it a key (Hermes may NOT auto-generate one)
